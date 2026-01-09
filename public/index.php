@@ -3,7 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Latitude Explorer</title>
+
+  <title>Same Latitude As - Find Cities That Share Your Latitude</title>
+  <meta name="description" content="Discover which cities around the world share your latitude. See who lives on the same horizontal slice of Earth and what percentage of humanity lives north or south of you.">
+  <meta name="keywords" content="latitude, geography, world cities, map, population, same latitude, latitude comparison, global cities">
+  <meta name="author" content="Robin Metcalfe">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Same Latitude As - Who's On Your Level?">
+  <meta property="og:description" content="Pick a city and discover which places around the world share your latitude. Find out what percentage of humanity lives north or south of you.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/intro-screenshot.jpg">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Same Latitude As - Who's On Your Level?">
+  <meta name="twitter:description" content="Pick a city and discover which places share your latitude around the globe.">
+  <meta name="twitter:image" content="/intro-screenshot.jpg">
+
+  <!-- Theme -->
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="canonical" href="https://solarise.dev/samelatitudeas/">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
