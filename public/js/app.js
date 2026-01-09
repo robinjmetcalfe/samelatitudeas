@@ -147,8 +147,37 @@
     initMapClick();
     initUnitToggles();
     initModal();
+    initIntroModal();
     initMobileNav();
     fetchPopStats();
+  }
+
+  // Intro modal (first visit only)
+  function initIntroModal() {
+    const introModal = document.getElementById('intro-modal');
+    const introStart = document.getElementById('intro-start');
+
+    // Check URL param to force show modal (for testing)
+    const urlParams = new URLSearchParams(window.location.search);
+    const forceModal = urlParams.get('modal') === '1';
+
+    // Check if user has visited before (unless forced via URL)
+    if (!forceModal && localStorage.getItem('introSeen')) {
+      introModal.classList.add('hidden');
+      return;
+    }
+
+    // Show intro modal
+    introStart.addEventListener('click', function() {
+      introModal.classList.add('hidden');
+      localStorage.setItem('introSeen', 'true');
+    });
+
+    // Also close on backdrop click
+    introModal.querySelector('.modal-backdrop').addEventListener('click', function() {
+      introModal.classList.add('hidden');
+      localStorage.setItem('introSeen', 'true');
+    });
   }
 
   // Modal functionality

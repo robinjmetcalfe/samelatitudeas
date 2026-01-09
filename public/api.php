@@ -26,7 +26,11 @@ if (!$isSameOrigin) {
     exit;
 }
 
-$dbFile = __DIR__ . '/../data/cities.db';
+// Production path first, then local dev fallback
+$dbFile = '/var/www/data/cities.db';
+if (!file_exists($dbFile)) {
+    $dbFile = __DIR__ . '/../data/cities.db';
+}
 
 if (!file_exists($dbFile)) {
     http_response_code(500);
