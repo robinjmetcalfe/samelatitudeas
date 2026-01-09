@@ -866,16 +866,18 @@
   function estimateTemps(lat) {
     const absLat = Math.abs(lat);
 
+    // Temperature bands based on real city data (averaging maritime/continental)
+    // Format: [latitude, winter_low_C, summer_high_C]
     const bands = [
-      [0, 22, 31],
-      [10, 20, 32],
-      [20, 15, 33],
-      [30, 8, 30],
-      [40, 2, 25],
-      [50, -2, 20],
-      [60, -8, 15],
-      [70, -15, 10],
-      [90, -30, 5]
+      [0, 22, 32],   // Tropical equator
+      [10, 20, 33],  // Tropical
+      [20, 12, 35],  // Subtropical desert
+      [30, 5, 33],   // Subtropical
+      [40, 0, 28],   // Temperate
+      [50, -4, 24],  // Cool temperate
+      [60, -8, 22],  // Subarctic (Stockholm/St Pete avg)
+      [70, -18, 15], // Arctic
+      [90, -35, 5]   // Polar
     ];
 
     for (let i = 0; i < bands.length - 1; i++) {
