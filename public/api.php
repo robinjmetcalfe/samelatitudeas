@@ -23,7 +23,7 @@ switch ($action) {
             exit;
         }
 
-        $stmt = $db->prepare('SELECT name, country, lat, lng, population FROM cities WHERE name LIKE ? ORDER BY population DESC LIMIT 15');
+        $stmt = $db->prepare('SELECT name, country, lat, lng, population, avg_temp FROM cities WHERE name LIKE ? ORDER BY population DESC LIMIT 15');
         $stmt->bindValue(1, $query . '%', SQLITE3_TEXT);
         $result = $stmt->execute();
 
@@ -40,7 +40,7 @@ switch ($action) {
         $tolerance = floatval($_GET['tolerance'] ?? 0.5);
         $minPop = intval($_GET['minPop'] ?? 50000);
 
-        $stmt = $db->prepare('SELECT name, country, lat, lng, population FROM cities WHERE lat BETWEEN ? AND ? AND population >= ? ORDER BY population DESC LIMIT 300');
+        $stmt = $db->prepare('SELECT name, country, lat, lng, population, avg_temp FROM cities WHERE lat BETWEEN ? AND ? AND population >= ? ORDER BY population DESC LIMIT 300');
         $stmt->bindValue(1, $lat - $tolerance, SQLITE3_FLOAT);
         $stmt->bindValue(2, $lat + $tolerance, SQLITE3_FLOAT);
         $stmt->bindValue(3, $minPop, SQLITE3_INTEGER);

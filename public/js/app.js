@@ -160,7 +160,7 @@
       const city = marker._cityData;
       if (city) {
         const distStr = formatDistance(city.lat, currentLat);
-        const tempStr = formatTemps(estimateTemps(city.lat));
+        const tempStr = formatTemp(city.avg_temp);
         marker.setTooltipContent(
           `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempStr}`
         );
@@ -633,9 +633,9 @@
   function updateCitiesList(cities) {
     const bounds = map.getBounds();
     citiesList.innerHTML = cities.slice(0, 100).map(city => {
-      const { name, country, lat, lng, population } = city;
+      const { name, country, lat, lng, population, avg_temp } = city;
       const distStr = formatDistance(lat, currentLat);
-      const tempStr = formatTemps(estimateTemps(lat));
+      const tempStr = formatTemp(avg_temp);
       const inViewport = lng >= bounds.getWest() && lng <= bounds.getEast();
       const offscreenClass = inViewport ? '' : ' offscreen';
       return `
@@ -647,7 +647,7 @@
           <div class="meta">
             <span class="pop">${formatPopulation(population)} pop</span>
             <span class="dist">${distStr}</span>
-            <span class="temp" title="Average annual min/max temps">${tempStr}</span>
+            <span class="temp" title="Average annual temperature (WorldClim)">${tempStr}</span>
           </div>
         </li>
       `;
@@ -706,7 +706,7 @@
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
       const distStr = formatDistance(city.lat, currentLat);
-      const tempStr = formatTemps(estimateTemps(city.lat));
+      const tempStr = formatTemp(city.avg_temp);
 
       const marker = L.circleMarker([city.lat, city.lng], {
         radius: markerRadius,
@@ -733,7 +733,7 @@
 
     matchingCities.forEach(city => {
       const distStr = formatDistance(city.lat, currentLat);
-      const tempStr = formatTemps(estimateTemps(city.lat));
+      const tempStr = formatTemp(city.avg_temp);
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
 
@@ -762,7 +762,7 @@
     clearMapLayers();
     drawLatitudeLine(lat);
 
-    const tempStr = formatTemps(estimateTemps(selectedCity.lat));
+    const tempStr = formatTemp(selectedCity.avg_temp);
 
     selectedMarker = L.circleMarker([selectedCity.lat, selectedCity.lng], {
       radius: getMarkerRadius(selectedCity.population) + 4,
@@ -779,7 +779,7 @@
 
     matchingCities.forEach(city => {
       const distStr = formatDistance(city.lat, currentLat);
-      const cTempStr = formatTemps(estimateTemps(city.lat));
+      const cTempStr = formatTemp(city.avg_temp);
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
 
@@ -863,49 +863,20 @@
     return Math.round(km) + 'km ' + dir;
   }
 
-  function estimateTemps(lat) {
-    const absLat = Math.abs(lat);
+  // Format temperature from WorldClim avg_temp data
+  function formatTemp(avgTempC) {
+    if (avgTempC === null || avgTempC === undefined) return '';
 
-    // Temperature bands based on real city data (averaging maritime/continental)
-    // Format: [latitude, winter_low_C, summer_high_C]
-    const bands = [
-      [0, 22, 32],   // Tropical equator
-      [10, 20, 33],  // Tropical
-      [20, 12, 35],  // Subtropical desert
-      [30, 5, 33],   // Subtropical
-      [40, 0, 28],   // Temperate
-      [50, -4, 24],  // Cool temperate
-      [60, -8, 22],  // Subarctic (Stockholm/St Pete avg)
-      [70, -18, 15], // Arctic
-      [90, -35, 5]   // Polar
-    ];
-
-    for (let i = 0; i < bands.length - 1; i++) {
-      if (absLat >= bands[i][0] && absLat < bands[i + 1][0]) {
-        const t = (absLat - bands[i][0]) / (bands[i + 1][0] - bands[i][0]);
-        const minC = Math.round(bands[i][1] + t * (bands[i + 1][1] - bands[i][1]));
-        const maxC = Math.round(bands[i][2] + t * (bands[i + 1][2] - bands[i][2]));
-        return { minC, maxC };
-      }
-    }
-
-    return { minC: -30, maxC: 5 };
-  }
-
-  function formatTemps(temps) {
-    let min, max, unit;
-
+    let temp, unit;
     if (tempUnit === 'f') {
-      min = Math.round(temps.minC * 9/5 + 32);
-      max = Math.round(temps.maxC * 9/5 + 32);
+      temp = Math.round(avgTempC * 9/5 + 32);
       unit = '°F';
     } else {
-      min = temps.minC;
-      max = temps.maxC;
+      temp = Math.round(avgTempC);
       unit = '°C';
     }
 
-    return `<span class="cold">${min}${unit}</span> / <span class="hot">${max}${unit}</span>`;
+    return `${temp}${unit}`;
   }
 
   if (document.readyState === 'loading') {
