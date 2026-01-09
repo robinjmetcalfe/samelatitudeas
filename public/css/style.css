@@ -17,6 +17,31 @@
   --accent-dim: rgba(167, 139, 250, 0.15);
   --orange: #fb923c;
   --blue: #60a5fa;
+  --band-color: rgba(255, 255, 255, 0.15);
+  --shadow-color: rgba(0, 0, 0, 0.5);
+  --bg-overlay: rgba(10, 10, 10, 0.85);
+  --bg-offscreen: rgba(255, 255, 255, 0.03);
+  --cold: #67e8f9;
+  --hot: #fca5a5;
+}
+
+[data-theme="light"] {
+  --bg: #f5f5f5;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e5e5e5;
+  --border: #d4d4d4;
+  --text: #171717;
+  --text-muted: #525252;
+  --accent: #7c3aed;
+  --accent-dim: rgba(124, 58, 237, 0.1);
+  --orange: #f97316;
+  --blue: #2563eb;
+  --band-color: rgba(0, 0, 0, 0.1);
+  --shadow-color: rgba(0, 0, 0, 0.15);
+  --bg-overlay: rgba(255, 255, 255, 0.9);
+  --bg-offscreen: rgba(0, 0, 0, 0.03);
+  --cold: #06b6d4;
+  --hot: #ef4444;
 }
 
 html, body {
@@ -152,6 +177,41 @@ body {
   border-color: var(--accent);
 }
 
+/* Theme toggle */
+.theme-toggle {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 32px;
+  height: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.theme-toggle .icon-sun {
+  display: none;
+}
+
+.theme-toggle .icon-moon {
+  display: block;
+}
+
+[data-theme="light"] .theme-toggle .icon-sun {
+  display: block;
+}
+
+[data-theme="light"] .theme-toggle .icon-moon {
+  display: none;
+}
+
 /* Location info */
 .location-info {
   display: flex;
@@ -204,7 +264,7 @@ body {
   font-size: clamp(16px, 4vw, 32px);
   font-weight: 600;
   z-index: 501;
-  text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+  text-shadow: 0 2px 20px var(--shadow-color);
   pointer-events: none;
   opacity: 0.6;
 }
@@ -228,7 +288,7 @@ body {
   top: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(10, 10, 10, 0.85);
+  background: var(--bg-overlay);
   backdrop-filter: blur(8px);
   padding: 6px 16px;
   font-size: clamp(11px, 1.8vw, 14px);
@@ -268,7 +328,7 @@ body {
   font-family: 'IBM Plex Sans', sans-serif;
   font-size: 12px;
   padding: 8px 10px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 12px var(--shadow-color);
   animation: tooltipFadeIn 100ms ease;
 }
 
@@ -278,11 +338,11 @@ body {
 }
 
 .city-tooltip .cold {
-  color: #67e8f9;
+  color: var(--cold);
 }
 
 .city-tooltip .hot {
-  color: #fca5a5;
+  color: var(--hot);
 }
 
 .leaflet-tooltip-top:before {
@@ -349,7 +409,7 @@ body {
 }
 
 .city-item.offscreen {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-offscreen);
 }
 
 .city-item.offscreen:hover {
@@ -400,11 +460,11 @@ body {
 }
 
 .city-item .temp .cold {
-  color: #67e8f9;
+  color: var(--cold);
 }
 
 .city-item .temp .hot {
-  color: #fca5a5;
+  color: var(--hot);
 }
 
 /* Leaflet overrides */
@@ -436,7 +496,7 @@ body {
 }
 
 .leaflet-control-attribution {
-  background: rgba(10, 10, 10, 0.8) !important;
+  background: var(--bg-overlay) !important;
   color: var(--text-muted) !important;
   font-size: 10px !important;
   padding: 2px 6px !important;
@@ -450,7 +510,7 @@ body {
   background: var(--bg-elevated);
   color: var(--text);
   border: 1px solid var(--border);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 12px var(--shadow-color);
 }
 
 .leaflet-popup-tip {
@@ -859,7 +919,7 @@ body {
     left: 0;
     right: 0;
     z-index: 999;
-    background: rgba(10, 10, 10, 0.9);
+    background: var(--bg-overlay);
     border: none;
     padding: 4px 12px;
   }

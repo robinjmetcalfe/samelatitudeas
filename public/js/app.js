@@ -59,6 +59,8 @@
   // User preferences
   let tempUnit = localStorage.getItem('tempUnit') || 'c';
   let distUnit = localStorage.getItem('distUnit') || 'km';
+  let theme = localStorage.getItem('theme') || 'dark';
+  let tileLayer = null;
 
   const LAT_TOLERANCE = 0.5;
   const MAX_ZOOM = 10;
@@ -142,6 +144,7 @@
 
   // Init
   function init() {
+    initTheme();
     initMap();
     initSearch();
     initMapClick();
@@ -150,6 +153,73 @@
     initIntroModal();
     initMobileNav();
     fetchPopStats();
+  }
+
+  // Theme toggle
+  function initTheme() {
+    const themeToggle = document.getElementById('theme-toggle');
+
+    // Apply saved theme on load
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+
+    themeToggle.addEventListener('click', function() {
+      theme = theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', theme);
+
+      if (theme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+
+      // Swap map tiles
+      if (map && tileLayer) {
+        map.removeLayer(tileLayer);
+        const tileUrl = theme === 'light'
+          ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+          : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        tileLayer = L.tileLayer(tileUrl, {
+          attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 19
+        }).addTo(map);
+      }
+
+      // Update latitude band color
+      if (latitudeLine) {
+        latitudeLine.setStyle({ fillColor: getBandColor() });
+      }
+
+      // Update selected markers color
+      selectedMarkers.forEach(m => {
+        m.setStyle({ fillColor: getSelectedMarkerColor() });
+      });
+
+      // Update city markers colors
+      markerRegistry.forEach(entry => {
+        const newColor = getMarkerColor(entry.city.population);
+        entry.options.fillColor = newColor;
+        Object.values(entry.markers).forEach(marker => {
+          marker.setStyle({ fillColor: newColor });
+          marker._origColor = newColor;
+        });
+      });
+    });
+  }
+
+  // Theme-aware colors
+  function getHighlightColor() {
+    return theme === 'light' ? '#171717' : '#ffffff';
+  }
+
+  function getSelectedMarkerColor() {
+    return theme === 'light' ? '#ea580c' : '#fb923c';
+  }
+
+  function getBandColor() {
+    return theme === 'light' ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.15)';
   }
 
   // Intro modal (first visit only)
@@ -457,7 +527,11 @@
       zoomControl: true
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    const tileUrl = theme === 'light'
+      ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+
+    tileLayer = L.tileLayer(tileUrl, {
       attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 19
@@ -536,7 +610,7 @@
         });
       } else {
         nearestMarker.setStyle({
-          fillColor: '#ffffff',
+          fillColor: getHighlightColor(),
           fillOpacity: 0.5 + glow * 0.5
         });
         nearestMarker.openTooltip();
@@ -1103,11 +1177,20 @@
     const logPop = Math.log(Math.max(pop, popMin));
     const ratio = Math.min(1, Math.max(0, (logPop - logMin) / (logMax - logMin)));
 
-    const r = Math.round(96 + ratio * (251 - 96));
-    const g = Math.round(165 + ratio * (146 - 165));
-    const b = Math.round(250 + ratio * (60 - 250));
-
-    return `rgb(${r}, ${g}, ${b})`;
+    // Vibrant colors for light mode, lighter pastels for dark mode
+    if (theme === 'light') {
+      // Vibrant blue to vibrant orange
+      const r = Math.round(37 + ratio * (249 - 37));
+      const g = Math.round(99 + ratio * (115 - 99));
+      const b = Math.round(235 + ratio * (22 - 235));
+      return `rgb(${r}, ${g}, ${b})`;
+    } else {
+      // Light purple-blue to light orange (original)
+      const r = Math.round(96 + ratio * (251 - 96));
+      const g = Math.round(165 + ratio * (146 - 165));
+      const b = Math.round(250 + ratio * (60 - 250));
+      return `rgb(${r}, ${g}, ${b})`;
+    }
   }
 
   function getMarkerRadius(pop) {
@@ -1301,7 +1384,7 @@
     // Create selected marker on all world tiles
     selectedMarkers = createStaticWrappedMarkers(selectedCity, {
       radius: getMarkerRadius(selectedCity.population) + 4,
-      fillColor: '#fb923c',
+      fillColor: getSelectedMarkerColor(),
       fillOpacity: 1,
       stroke: false,
       interactive: false
@@ -1341,7 +1424,7 @@
       [lat + halfWidth, west]
     ], {
       stroke: false,
-      fillColor: 'rgba(255, 255, 255, 0.15)',
+      fillColor: getBandColor(),
       fillOpacity: 1
     }).addTo(map);
   }
