@@ -270,6 +270,12 @@ body {
   font-size: 12px;
   padding: 8px 10px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  animation: tooltipFadeIn 100ms ease;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .city-tooltip .cold {
@@ -334,6 +340,14 @@ body {
 }
 
 .city-item:hover {
+  background: var(--bg-hover);
+}
+
+.city-item.offscreen {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.city-item.offscreen:hover {
   background: var(--bg-hover);
 }
 

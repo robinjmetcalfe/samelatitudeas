@@ -40,20 +40,74 @@
   const LAT_TOLERANCE = 0.5;
   const MAX_ZOOM = 10;
   const MIN_ZOOM = 2;
+  const MIN_DOTS = 20; // Minimum cities to show even in sparse regions
 
   // Cache for latitude queries: { "lat_minPop": [cities] }
   const latCache = new Map();
   const CACHE_MAX_SIZE = 20;
 
   // Get minimum population based on zoom level
+  // Scale: world view shows major cities, zoomed in shows smaller towns
   function getMinPopForZoom(zoom) {
-    if (zoom >= 8) return 5000;
-    if (zoom >= 7) return 10000;
-    if (zoom >= 6) return 25000;
-    if (zoom >= 5) return 50000;
-    if (zoom >= 4) return 100000;
-    if (zoom >= 3) return 250000;
-    return 500000;
+    if (zoom >= 10) return 5000;    // City district level
+    if (zoom >= 9) return 15000;    // City level
+    if (zoom >= 8) return 50000;    // Metro area
+    if (zoom >= 7) return 100000;   // Region
+    if (zoom >= 6) return 200000;   // Small country (UK visible)
+    if (zoom >= 5) return 300000;   // Large country
+    if (zoom >= 4) return 400000;   // Continent
+    if (zoom >= 3) return 500000;   // Multi-continent
+    return 750000;                  // World view
+  }
+
+  // Filter cities by zoom level threshold, with fallbacks for sparse regions
+  function filterCitiesForZoom(cities, zoom, excludeName = null) {
+    const minPop = getMinPopForZoom(zoom);
+    let baseCities = excludeName ? cities.filter(c => c.name !== excludeName) : cities;
+    let filtered = baseCities.filter(c => c.population >= minPop);
+
+    // If we have fewer than MIN_DOTS globally, take the top cities by population
+    if (filtered.length < MIN_DOTS && baseCities.length > filtered.length) {
+      const sorted = [...baseCities].sort((a, b) => b.population - a.population);
+      filtered = sorted.slice(0, Math.max(MIN_DOTS, filtered.length));
+    }
+
+    // Spatial distribution: fill gaps in sparse longitude regions
+    // Divide the world into segments and ensure each has some representation
+    const NUM_SEGMENTS = 12; // 30° longitude segments
+    const MIN_PER_SEGMENT = 2;
+    const filteredSet = new Set(filtered.map(c => `${c.name}-${c.lat}-${c.lng}`));
+
+    // Group cities by longitude segment
+    const segments = new Array(NUM_SEGMENTS).fill(null).map(() => ({ filtered: [], all: [] }));
+    for (const city of baseCities) {
+      const segIdx = Math.floor(((city.lng + 180) % 360) / (360 / NUM_SEGMENTS));
+      const safeIdx = Math.max(0, Math.min(NUM_SEGMENTS - 1, segIdx));
+      const key = `${city.name}-${city.lat}-${city.lng}`;
+      if (filteredSet.has(key)) {
+        segments[safeIdx].filtered.push(city);
+      }
+      segments[safeIdx].all.push(city);
+    }
+
+    // Fill sparse segments with additional cities
+    const additional = [];
+    for (const seg of segments) {
+      if (seg.filtered.length < MIN_PER_SEGMENT && seg.all.length > seg.filtered.length) {
+        // Sort by population and add top cities not already included
+        const sorted = seg.all
+          .filter(c => !filteredSet.has(`${c.name}-${c.lat}-${c.lng}`))
+          .sort((a, b) => b.population - a.population);
+        const needed = MIN_PER_SEGMENT - seg.filtered.length;
+        additional.push(...sorted.slice(0, needed));
+      }
+    }
+
+    if (additional.length > 0) {
+      filtered = [...filtered, ...additional];
+    }
+
+    return filtered;
   }
 
   // Init
@@ -137,20 +191,27 @@
     // Update on map move/zoom
     map.on('move', updateLabelPositions);
     map.on('zoomend', onZoomEnd);
+    map.on('moveend', onMoveEnd);
 
     // Proximity-based marker highlighting
     map.on('mousemove', handleProximityHighlight);
     map.getContainer().addEventListener('mouseleave', clearProximityHighlight);
   }
 
-  // On zoom change, update visible cities
+  // On zoom change, update visible cities and redraw markers
   function onZoomEnd() {
     if (currentLat !== null && allCitiesAtLat.length > 0) {
-      const minPop = getMinPopForZoom(map.getZoom());
-      const filtered = allCitiesAtLat.filter(c => c.population >= minPop);
+      const filtered = filterCitiesForZoom(allCitiesAtLat, map.getZoom());
       currentCities = filtered;
       updateCitiesList(getVisibleCities());
       redrawMarkers(filtered);
+    }
+  }
+
+  // On pan, update sidebar to show visible cities
+  function onMoveEnd() {
+    if (currentLat !== null && currentCities.length > 0) {
+      updateCitiesList(getVisibleCities());
     }
   }
 
@@ -158,7 +219,7 @@
     if (cityMarkers.length === 0) return;
 
     const mousePoint = e.containerPoint;
-    const maxDistPx = window.innerWidth * 0.025;
+    const maxDistPx = Math.min(window.innerWidth, window.innerHeight) * 0.1; // 10vmin
 
     let nearestMarker = null;
     let nearestDist = Infinity;
@@ -185,12 +246,19 @@
 
     if (nearestMarker && nearestMarker !== selectedCityMarker) {
       const glow = 1 - (nearestDist / maxDistPx);
-      nearestMarker.setStyle({
-        fillColor: '#ffffff',
-        fillOpacity: 0.5 + glow * 0.5
-      });
-      nearestMarker.openTooltip();
-      highlightedMarker = nearestMarker;
+      // Only update style, not tooltip, if same marker (prevents flicker)
+      if (nearestMarker === highlightedMarker) {
+        nearestMarker.setStyle({
+          fillOpacity: 0.5 + glow * 0.5
+        });
+      } else {
+        nearestMarker.setStyle({
+          fillColor: '#ffffff',
+          fillOpacity: 0.5 + glow * 0.5
+        });
+        nearestMarker.openTooltip();
+        highlightedMarker = nearestMarker;
+      }
     } else if (!nearestMarker) {
       highlightedMarker = null;
     }
@@ -332,8 +400,7 @@
       const allCities = await fetchCitiesAtLatitude(lat);
       allCitiesAtLat = allCities;
 
-      const minPop = getMinPopForZoom(map.getZoom());
-      const filtered = allCities.filter(c => c.population >= minPop);
+      const filtered = filterCitiesForZoom(allCities, map.getZoom());
       currentCities = filtered;
 
       updatePopStats(lat, allCities);
@@ -465,8 +532,7 @@
       const allCities = await fetchCitiesAtLatitude(lat);
       allCitiesAtLat = allCities;
 
-      const minPop = getMinPopForZoom(map.getZoom());
-      const filtered = allCities.filter(c => c.population >= minPop && c.name !== name);
+      const filtered = filterCitiesForZoom(allCities, map.getZoom(), name);
       currentCities = filtered;
 
       updatePopStats(lat, allCities);
@@ -484,8 +550,39 @@
 
     const bandPercent = Math.abs(stats.percentNorth - statsAbove.percentNorth);
     const worldPop = 8000000000;
-    const estimatedBandPop = Math.round(bandPercent / 100 * worldPop);
-    const errorMargin = Math.round(estimatedBandPop * 0.3);
+    const latitudeEstimate = Math.round(bandPercent / 100 * worldPop);
+
+    // Sum population from cities we have (5000+ pop)
+    const knownCityPop = cities.reduce((sum, c) => sum + c.population, 0);
+
+    // Estimate coverage: cities 5000+ typically capture 50-70% of total population
+    // Higher in developed/urban regions, lower in rural regions
+    // Use ratio of known to expected to gauge urbanization level
+    const rawRatio = knownCityPop / latitudeEstimate;
+
+    // Clamp ratio and estimate total based on typical urban capture rates
+    // If rawRatio > 0.7, area is highly urban - our data captures most
+    // If rawRatio < 0.3, area is rural - significant pop in small settlements
+    let estimatedBandPop, errorMargin;
+
+    if (rawRatio > 0.6) {
+      // Urban area: our city data is fairly complete
+      // Scale up slightly for small towns we're missing
+      estimatedBandPop = Math.round(knownCityPop / 0.75);
+      errorMargin = Math.round(estimatedBandPop * 0.08);
+    } else if (rawRatio > 0.3) {
+      // Mixed area: blend estimates
+      const cityBasedEstimate = Math.round(knownCityPop / 0.55);
+      estimatedBandPop = Math.round((latitudeEstimate + cityBasedEstimate) / 2);
+      errorMargin = Math.round(Math.abs(latitudeEstimate - cityBasedEstimate) / 3);
+    } else {
+      // Rural/sparse area: rely more on latitude data
+      estimatedBandPop = latitudeEstimate;
+      errorMargin = Math.round(latitudeEstimate * 0.12);
+    }
+
+    // Ensure minimum reasonable error margin
+    errorMargin = Math.max(errorMargin, Math.round(estimatedBandPop * 0.05));
 
     const northRounded = Math.max(0.1, Math.round(stats.percentNorth * 10) / 10);
     const southRounded = Math.max(0.1, Math.min(99.9, Math.round((100 - northRounded) * 10) / 10));
@@ -504,21 +601,45 @@
     setTimeout(updateLabelPositions, 100);
   }
 
-  // Get cities currently visible in viewport
+  // Get cities for sidebar: all visible dots + major cities (500k+) outside viewport
+  const SIDEBAR_MIN_POP_OFFSCREEN = 500000;
+
   function getVisibleCities() {
     const bounds = map.getBounds();
-    return currentCities.filter(city => {
-      return city.lng >= bounds.getWest() && city.lng <= bounds.getEast();
+    const visibleSet = new Set();
+    const result = [];
+
+    // First add all cities that are currently displayed as dots (in currentCities) AND visible
+    currentCities.forEach(city => {
+      const inView = city.lng >= bounds.getWest() && city.lng <= bounds.getEast();
+      if (inView) {
+        result.push(city);
+        visibleSet.add(`${city.name}-${city.lat}-${city.lng}`);
+      }
     });
+
+    // Then add large cities (500k+) from the full list that aren't in viewport
+    allCitiesAtLat.forEach(city => {
+      const key = `${city.name}-${city.lat}-${city.lng}`;
+      if (!visibleSet.has(key) && city.population >= SIDEBAR_MIN_POP_OFFSCREEN) {
+        result.push(city);
+      }
+    });
+
+    // Sort by population descending
+    return result.sort((a, b) => b.population - a.population);
   }
 
   function updateCitiesList(cities) {
+    const bounds = map.getBounds();
     citiesList.innerHTML = cities.slice(0, 100).map(city => {
       const { name, country, lat, lng, population } = city;
       const distStr = formatDistance(lat, currentLat);
       const tempStr = formatTemps(estimateTemps(lat));
+      const inViewport = lng >= bounds.getWest() && lng <= bounds.getEast();
+      const offscreenClass = inViewport ? '' : ' offscreen';
       return `
-        <li class="city-item" data-lat="${lat}" data-lng="${lng}" data-name="${name}">
+        <li class="city-item${offscreenClass}" data-lat="${lat}" data-lng="${lng}" data-name="${name}">
           <div class="info">
             <div class="name">${name}</div>
             <div class="country">${country}</div>
@@ -548,7 +669,7 @@
           marker.openTooltip();
         }
 
-        map.flyTo([currentLat, lng], Math.min(map.getZoom() + 1, MAX_ZOOM), { duration: 0.5 });
+        map.panTo([currentLat, lng], { duration: 0.5 });
       });
     });
   }
@@ -591,7 +712,8 @@
         radius: markerRadius,
         fillColor: markerColor,
         fillOpacity: 0.9,
-        stroke: false
+        stroke: false,
+        interactive: false  // Allow clicks to pass through to map
       }).addTo(map);
 
       marker.bindTooltip(
@@ -619,7 +741,8 @@
         radius: markerRadius,
         fillColor: markerColor,
         fillOpacity: 0.9,
-        stroke: false
+        stroke: false,
+        interactive: false  // Allow clicks to pass through to map
       }).addTo(map);
 
       marker.bindTooltip(
@@ -645,7 +768,8 @@
       radius: getMarkerRadius(selectedCity.population) + 4,
       fillColor: '#fb923c',
       fillOpacity: 1,
-      stroke: false
+      stroke: false,
+      interactive: false  // Allow clicks to pass through to map
     }).addTo(map);
 
     selectedMarker.bindTooltip(
@@ -663,7 +787,8 @@
         radius: markerRadius,
         fillColor: markerColor,
         fillOpacity: 0.9,
-        stroke: false
+        stroke: false,
+        interactive: false  // Allow clicks to pass through to map
       }).addTo(map);
 
       marker.bindTooltip(
@@ -682,11 +807,12 @@
 
   function drawLatitudeLine(lat) {
     const halfWidth = 0.5;
+    // Extend to cover 3 world tiles (left, center, right) for seamless wrapping
     latitudeLine = L.polygon([
-      [lat - halfWidth, -180],
-      [lat - halfWidth, 180],
-      [lat + halfWidth, 180],
-      [lat + halfWidth, -180]
+      [lat - halfWidth, -540],
+      [lat - halfWidth, 540],
+      [lat + halfWidth, 540],
+      [lat + halfWidth, -540]
     ], {
       stroke: false,
       fillColor: 'rgba(255, 255, 255, 0.15)',
