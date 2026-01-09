@@ -18,16 +18,39 @@
   const tempUnitSelect = document.getElementById('temp-unit');
   const distUnitSelect = document.getElementById('dist-unit');
 
+  // Mobile elements
+  const mobilePopStat = document.getElementById('mobile-pop-stat');
+  const mobileCitiesPanel = document.getElementById('mobile-cities-panel');
+  const mobileCityCard = document.getElementById('mobile-city-card');
+  const mobileCityName = mobileCityCard.querySelector('.mobile-city-name');
+  const mobileCityMeta = mobileCityCard.querySelector('.mobile-city-meta');
+  const mobilePrevBtn = document.getElementById('mobile-prev');
+  const mobileNextBtn = document.getElementById('mobile-next');
+  const mobileCityDots = document.getElementById('mobile-city-dots');
+  const mobileReferenceCity = document.getElementById('mobile-reference-city');
+
+  // Desktop reference city
+  const desktopReferenceCity = document.getElementById('reference-city');
+
+  // Modal elements
+  const dataModal = document.getElementById('data-modal');
+  const dataSourcesLink = document.getElementById('data-sources-link');
+  const modalClose = dataModal.querySelector('.modal-close');
+  const modalBackdrop = dataModal.querySelector('.modal-backdrop');
+
   // State
   let map;
   let latitudeLine = null;
   let cityMarkers = [];
-  let selectedMarker = null;
+  let selectedMarkers = []; // Array for world-wrapped selected markers
   let isDragging = false;
   let currentLat = null;
   let currentLng = null;
   let currentCities = [];
   let allCitiesAtLat = []; // Full cache of cities at current latitude
+  let mobileCityIndex = 0; // Current city index for mobile panel
+  let mobileCities = []; // Major cities for mobile panel (top 10 by pop)
+  let referenceCity = null; // The city we're comparing against
 
   // Population stats for marker sizing
   let popMin = 1000;
@@ -41,6 +64,13 @@
   const MAX_ZOOM = 10;
   const MIN_ZOOM = 2;
   const MIN_DOTS = 20; // Minimum cities to show even in sparse regions
+  const MOBILE_BREAKPOINT = 768;
+  const MOBILE_MAX_CITIES = 10; // Max cities to show in mobile panel
+
+  // Check if mobile view
+  function isMobile() {
+    return window.innerWidth <= MOBILE_BREAKPOINT;
+  }
 
   // Cache for latitude queries: { "lat_minPop": [cities] }
   const latCache = new Map();
@@ -49,15 +79,15 @@
   // Get minimum population based on zoom level
   // Scale: world view shows major cities, zoomed in shows smaller towns
   function getMinPopForZoom(zoom) {
-    if (zoom >= 10) return 5000;    // City district level
-    if (zoom >= 9) return 15000;    // City level
-    if (zoom >= 8) return 50000;    // Metro area
-    if (zoom >= 7) return 100000;   // Region
-    if (zoom >= 6) return 200000;   // Small country (UK visible)
-    if (zoom >= 5) return 300000;   // Large country
-    if (zoom >= 4) return 400000;   // Continent
-    if (zoom >= 3) return 500000;   // Multi-continent
-    return 750000;                  // World view
+    if (zoom >= 10) return 2000;    // City district level
+    if (zoom >= 9) return 8000;     // City level
+    if (zoom >= 8) return 25000;    // Metro area
+    if (zoom >= 7) return 50000;    // Region
+    if (zoom >= 6) return 100000;   // Small country (UK visible)
+    if (zoom >= 5) return 150000;   // Large country
+    if (zoom >= 4) return 250000;   // Continent
+    if (zoom >= 3) return 350000;   // Multi-continent
+    return 500000;                  // World view
   }
 
   // Filter cities by zoom level threshold, with fallbacks for sparse regions
@@ -116,7 +146,213 @@
     initSearch();
     initMapClick();
     initUnitToggles();
+    initModal();
+    initMobileNav();
     fetchPopStats();
+  }
+
+  // Modal functionality
+  function initModal() {
+    dataSourcesLink.addEventListener('click', function(e) {
+      e.preventDefault();
+      dataModal.classList.remove('hidden');
+    });
+
+    modalClose.addEventListener('click', closeModal);
+    modalBackdrop.addEventListener('click', closeModal);
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && !dataModal.classList.contains('hidden')) {
+        closeModal();
+      }
+    });
+  }
+
+  function closeModal() {
+    dataModal.classList.add('hidden');
+  }
+
+  // Mobile navigation
+  function initMobileNav() {
+    // Prevent clicks on mobile panel from reaching the map
+    mobileCitiesPanel.addEventListener('click', function(e) {
+      e.stopPropagation();
+    });
+    mobileCitiesPanel.addEventListener('touchend', function(e) {
+      e.stopPropagation();
+    });
+
+    mobilePrevBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (mobileCityIndex > 0) {
+        mobileCityIndex--;
+        updateMobileCityCard();
+        panToMobileCity();
+      }
+    });
+
+    mobileNextBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (mobileCityIndex < mobileCities.length - 1) {
+        mobileCityIndex++;
+        updateMobileCityCard();
+        panToMobileCity();
+      }
+    });
+
+    // Swipe support
+    let touchStartX = 0;
+    mobileCityCard.addEventListener('touchstart', function(e) {
+      touchStartX = e.touches[0].clientX;
+    }, { passive: true });
+
+    mobileCityCard.addEventListener('touchend', function(e) {
+      e.stopPropagation();
+      const touchEndX = e.changedTouches[0].clientX;
+      const diff = touchStartX - touchEndX;
+      if (Math.abs(diff) > 50) {
+        if (diff > 0 && mobileCityIndex < mobileCities.length - 1) {
+          mobileCityIndex++;
+        } else if (diff < 0 && mobileCityIndex > 0) {
+          mobileCityIndex--;
+        }
+        updateMobileCityCard();
+        panToMobileCity();
+      }
+    });
+  }
+
+  function updateMobileCities(cities, selectedCityName = null) {
+    // Get top cities by population, then sort by longitude (west to east)
+    mobileCities = [...cities]
+      .sort((a, b) => b.population - a.population)
+      .slice(0, MOBILE_MAX_CITIES)
+      .sort((a, b) => a.lng - b.lng); // Sort west to east
+
+    // If a city was selected, try to show it (even if not in top 10)
+    mobileCityIndex = 0;
+    if (selectedCityName) {
+      // First check if it's already in the list
+      const idx = mobileCities.findIndex(c => c.name === selectedCityName);
+      if (idx >= 0) {
+        mobileCityIndex = idx;
+      } else {
+        // Add the selected city in the correct longitude position
+        const selectedCity = cities.find(c => c.name === selectedCityName);
+        if (selectedCity) {
+          // Find insertion point by longitude
+          let insertIdx = mobileCities.findIndex(c => c.lng > selectedCity.lng);
+          if (insertIdx === -1) insertIdx = mobileCities.length;
+          mobileCities.splice(insertIdx, 0, selectedCity);
+          if (mobileCities.length > MOBILE_MAX_CITIES + 1) {
+            // Remove the city furthest from the selected one
+            const selectedLng = selectedCity.lng;
+            let furthestIdx = 0;
+            let furthestDist = 0;
+            mobileCities.forEach((c, i) => {
+              if (c.name !== selectedCityName) {
+                const dist = Math.abs(c.lng - selectedLng);
+                if (dist > furthestDist) {
+                  furthestDist = dist;
+                  furthestIdx = i;
+                }
+              }
+            });
+            mobileCities.splice(furthestIdx, 1);
+          }
+          mobileCityIndex = mobileCities.findIndex(c => c.name === selectedCityName);
+        }
+      }
+    }
+
+    if (mobileCities.length > 0) {
+      mobileCitiesPanel.classList.remove('hidden');
+      updateMobileCityCard();
+      updateMobileDots();
+    }
+  }
+
+  function updateMobileCityCard() {
+    if (mobileCities.length === 0) return;
+
+    const city = mobileCities[mobileCityIndex];
+    const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
+
+    mobileCityName.textContent = `${city.name}, ${city.country}`;
+    mobileCityMeta.textContent = `${formatPopulation(city.population)} · ${tempRangeStr}`;
+
+    // Update button states
+    mobilePrevBtn.disabled = mobileCityIndex === 0;
+    mobileNextBtn.disabled = mobileCityIndex === mobileCities.length - 1;
+
+    updateMobileDots();
+  }
+
+  function updateMobileDots() {
+    const maxDots = Math.min(mobileCities.length, 7);
+    let dotsHtml = '';
+    for (let i = 0; i < maxDots; i++) {
+      dotsHtml += `<span class="dot${i === mobileCityIndex ? ' active' : ''}"></span>`;
+    }
+    mobileCityDots.innerHTML = dotsHtml;
+  }
+
+  function panToMobileCity() {
+    if (mobileCities.length === 0) return;
+    const city = mobileCities[mobileCityIndex];
+    map.panTo([currentLat, city.lng], { duration: 0.3 });
+  }
+
+  function updateMobilePopStat(estimatedPop, errorMargin) {
+    if (isMobile()) {
+      mobilePopStat.innerHTML = `<span class="pop-value">${formatPopulation(estimatedPop)}</span> ±${formatPopulation(errorMargin)} at this latitude`;
+      mobilePopStat.classList.remove('hidden');
+    }
+  }
+
+  // Update reference city display (both mobile and desktop)
+  function updateReferenceCity(city) {
+    referenceCity = city;
+    const displayName = city ? city.name : '';
+    mobileReferenceCity.textContent = displayName;
+    desktopReferenceCity.textContent = displayName;
+  }
+
+  // Find best city near a lat/lng point (balancing distance and population)
+  function findBestNearbyCity(lat, lng, cities) {
+    if (!cities || cities.length === 0) return null;
+
+    let best = null;
+    let bestScore = -Infinity;
+
+    // Convert screen distance threshold to rough lat/lng distance
+    // At zoom 3, world is ~2000px wide, so 1 degree ≈ 5.5px
+    // We want to consider cities within ~100px at zoom 3
+    const maxDistDegrees = 20; // rough threshold in degrees
+
+    cities.forEach(city => {
+      const dist = Math.sqrt(
+        Math.pow(city.lat - lat, 2) +
+        Math.pow(city.lng - lng, 2)
+      );
+
+      if (dist > maxDistDegrees) return;
+
+      // Score formula: prefer larger cities, penalize distance
+      // log(population) gives reasonable scale (5-17 for 100 to 25M)
+      // Divide by distance squared to heavily penalize far cities
+      // Add small constant to avoid division by zero for very close cities
+      const popScore = Math.log(city.population);
+      const distPenalty = Math.pow(dist + 0.5, 1.5);
+      const score = popScore / distPenalty;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = city;
+      }
+    });
+
+    return best;
   }
 
   async function fetchPopStats() {
@@ -160,16 +396,15 @@
       const city = marker._cityData;
       if (city) {
         const distStr = formatDistance(city.lat, currentLat);
-        const tempStr = formatTemp(city.avg_temp);
+        const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
         marker.setTooltipContent(
-          `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempStr}`
+          `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`
         );
       }
     });
   }
 
   let highlightedMarker = null;
-  let selectedCityMarker = null;
 
   function initMap() {
     map = L.map('map', {
@@ -210,8 +445,14 @@
 
   // On pan, update sidebar to show visible cities
   function onMoveEnd() {
-    if (currentLat !== null && currentCities.length > 0) {
-      updateCitiesList(getVisibleCities());
+    if (currentLat !== null) {
+      // Update markers for new world tile offsets
+      if (markerRegistry.length > 0) {
+        updateWorldWrappedMarkers();
+      }
+      if (currentCities.length > 0) {
+        updateCitiesList(getVisibleCities());
+      }
     }
   }
 
@@ -236,7 +477,7 @@
       }
     });
 
-    if (highlightedMarker && highlightedMarker !== nearestMarker && highlightedMarker !== selectedCityMarker) {
+    if (highlightedMarker && highlightedMarker !== nearestMarker) {
       highlightedMarker.setStyle({
         fillColor: highlightedMarker._origColor,
         fillOpacity: 0.9
@@ -244,7 +485,7 @@
       highlightedMarker.closeTooltip();
     }
 
-    if (nearestMarker && nearestMarker !== selectedCityMarker) {
+    if (nearestMarker) {
       const glow = 1 - (nearestDist / maxDistPx);
       // Only update style, not tooltip, if same marker (prevents flicker)
       if (nearestMarker === highlightedMarker) {
@@ -259,13 +500,13 @@
         nearestMarker.openTooltip();
         highlightedMarker = nearestMarker;
       }
-    } else if (!nearestMarker) {
+    } else {
       highlightedMarker = null;
     }
   }
 
   function clearProximityHighlight() {
-    if (highlightedMarker && highlightedMarker !== selectedCityMarker) {
+    if (highlightedMarker) {
       highlightedMarker.setStyle({
         fillColor: highlightedMarker._origColor,
         fillOpacity: 0.9
@@ -303,54 +544,58 @@
       if (isDragging) return;
 
       const clickPoint = e.containerPoint;
-      const maxDistPx = window.innerWidth * 0.05;
+      const tapRadius = 30; // pixels
 
-      let nearestMarker = null;
-      let nearestDist = Infinity;
-
-      cityMarkers.forEach(marker => {
-        const markerPoint = map.latLngToContainerPoint(marker.getLatLng());
+      // Check if there's already an activated marker (tooltip open) near the click
+      // This applies to both mobile and desktop
+      if (highlightedMarker && highlightedMarker._cityData) {
+        const markerPoint = map.latLngToContainerPoint(highlightedMarker.getLatLng());
         const dist = Math.sqrt(
           Math.pow(clickPoint.x - markerPoint.x, 2) +
           Math.pow(clickPoint.y - markerPoint.y, 2)
         );
-        if (dist < nearestDist && dist <= maxDistPx) {
-          nearestDist = dist;
-          nearestMarker = marker;
+        if (dist <= tapRadius) {
+          // Use the already highlighted marker's city
+          const city = highlightedMarker._cityData;
+          updateReferenceCity(city);
+          map.panTo([city.lat, city.lng], { duration: 0.3 });
+          return; // Don't move band
         }
-      });
-
-      if (nearestMarker) {
-        highlightSelectedMarker(nearestMarker);
-        nearestMarker.openTooltip();
-      } else {
-        selectLatitude(e.latlng.lat, e.latlng.lng);
       }
-    });
-  }
 
-  function highlightSelectedMarker(marker) {
-    if (selectedCityMarker && selectedCityMarker !== marker) {
-      selectedCityMarker.setStyle({
-        fillColor: selectedCityMarker._origColor,
-        fillOpacity: 0.9
-      });
-    }
-    marker.setStyle({
-      fillColor: '#22d3ee',
-      fillOpacity: 1
-    });
-    selectedCityMarker = marker;
-  }
+      // On mobile, check if tap is near a marker - show tooltip and set as reference
+      if (isMobile() && cityMarkers.length > 0) {
+        let nearestMarker = null;
+        let nearestDist = Infinity;
 
-  function clearSelectedMarker() {
-    if (selectedCityMarker) {
-      selectedCityMarker.setStyle({
-        fillColor: selectedCityMarker._origColor,
-        fillOpacity: 0.9
-      });
-      selectedCityMarker = null;
-    }
+        cityMarkers.forEach(marker => {
+          const markerPoint = map.latLngToContainerPoint(marker.getLatLng());
+          const dist = Math.sqrt(
+            Math.pow(clickPoint.x - markerPoint.x, 2) +
+            Math.pow(clickPoint.y - markerPoint.y, 2)
+          );
+          if (dist < nearestDist && dist <= tapRadius) {
+            nearestDist = dist;
+            nearestMarker = marker;
+          }
+        });
+
+        if (nearestMarker && nearestMarker._cityData) {
+          // Close any open tooltip first
+          cityMarkers.forEach(m => m.closeTooltip());
+          // Show tooltip for tapped marker
+          nearestMarker.openTooltip();
+          // Set as reference city and pan to it
+          const city = nearestMarker._cityData;
+          updateReferenceCity(city);
+          map.panTo([city.lat, city.lng], { duration: 0.3 });
+          return; // Don't move band
+        }
+      }
+
+      // Reposition band on click (desktop always, mobile only if not near marker)
+      selectLatitude(e.latlng.lat, e.latlng.lng);
+    });
   }
 
   // Get cache key for latitude query
@@ -386,6 +631,54 @@
     console.log('Latitude cache cleared');
   };
 
+  // Check if any city is within screen distance of a point
+  function findCitiesWithinScreenDistance(lat, lng, cities, maxScreenDist) {
+    const clickPoint = map.latLngToContainerPoint([lat, lng]);
+    const nearby = [];
+
+    cities.forEach(city => {
+      const cityPoint = map.latLngToContainerPoint([city.lat, city.lng]);
+      const dist = Math.sqrt(
+        Math.pow(clickPoint.x - cityPoint.x, 2) +
+        Math.pow(clickPoint.y - cityPoint.y, 2)
+      );
+      if (dist <= maxScreenDist) {
+        nearby.push({ city, dist });
+      }
+    });
+
+    return nearby;
+  }
+
+  // Find the zoom level needed to show cities near a point
+  function findZoomForNearbyCities(lat, lng, allCities, maxScreenDist) {
+    const currentZoom = map.getZoom();
+
+    // Try each zoom level from current up to max
+    for (let zoom = currentZoom; zoom <= 12; zoom++) {
+      const citiesAtZoom = filterCitiesForZoom(allCities, zoom);
+
+      // Check if any of these cities would be within range at this zoom
+      for (const city of citiesAtZoom) {
+        // Approximate screen distance at this zoom level
+        // Each zoom level doubles the scale
+        const zoomFactor = Math.pow(2, zoom - currentZoom);
+        const degPerPixel = 360 / (256 * Math.pow(2, zoom));
+        const distDegrees = Math.sqrt(
+          Math.pow(city.lat - lat, 2) +
+          Math.pow(city.lng - lng, 2)
+        );
+        const approxScreenDist = distDegrees / degPerPixel;
+
+        if (approxScreenDist <= maxScreenDist) {
+          return { zoom, cities: citiesAtZoom };
+        }
+      }
+    }
+
+    return null;
+  }
+
   async function selectLatitude(lat, lng) {
     searchInput.value = '';
     currentLat = lat;
@@ -400,13 +693,89 @@
       const allCities = await fetchCitiesAtLatitude(lat);
       allCitiesAtLat = allCities;
 
-      const filtered = filterCitiesForZoom(allCities, map.getZoom());
+      // Calculate 5vmin in pixels
+      const vmin = Math.min(window.innerWidth, window.innerHeight);
+      const maxScreenDist = vmin * 0.05; // 5vmin
+
+      let targetZoom = map.getZoom();
+      let filtered = filterCitiesForZoom(allCities, targetZoom);
+
+      // Check if any visible cities are within 5vmin of click
+      let nearbyCities = findCitiesWithinScreenDistance(lat, lng, filtered, maxScreenDist);
+
+      // If no nearby visible cities, check if zooming in would reveal some
+      if (nearbyCities.length === 0) {
+        const zoomResult = findZoomForNearbyCities(lat, lng, allCities, maxScreenDist);
+        if (zoomResult) {
+          targetZoom = zoomResult.zoom;
+          filtered = zoomResult.cities;
+        }
+      }
+
       currentCities = filtered;
+
+      // Find best nearby city from visible cities (may be null if none nearby)
+      const bestCity = findBestNearbyCity(lat, lng, filtered);
+      updateReferenceCity(bestCity);
 
       updatePopStats(lat, allCities);
       updateCitiesList(getVisibleCities());
+      updateMobileCities(allCities, bestCity ? bestCity.name : null);
       citiesPanel.classList.remove('hidden');
-      updateMapForLatitude(lat, lng, filtered);
+
+      // Pan/zoom to best city if found, otherwise to click location
+      const targetLng = bestCity ? bestCity.lng : lng;
+
+      clearMapLayers();
+      drawLatitudeLine(lat);
+
+      // Create markers for filtered cities
+      filtered.forEach(city => {
+        const distStr = formatDistance(city.lat, currentLat);
+        const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
+        const markerColor = getMarkerColor(city.population);
+        const markerRadius = getMarkerRadius(city.population);
+        const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`;
+
+        registerCityMarker(city, {
+          radius: markerRadius,
+          fillColor: markerColor,
+          fillOpacity: 0.9,
+          stroke: false,
+          interactive: false
+        }, tooltipContent);
+      });
+
+      // Zoom in if needed, otherwise just pan
+      if (targetZoom > map.getZoom()) {
+        map.flyTo([lat, targetLng], targetZoom, { duration: 0.5 });
+      } else {
+        map.setView([lat, targetLng], map.getZoom(), { animate: true, duration: 0.3 });
+      }
+
+      // Open tooltip for reference city after map settles
+      if (bestCity) {
+        setTimeout(() => {
+          const center = map.getCenter();
+          let bestMarker = null;
+          let bestDist = Infinity;
+
+          cityMarkers.forEach(m => {
+            if (m._cityData && m._cityData.name === bestCity.name) {
+              const markerLng = m.getLatLng().lng;
+              const dist = Math.abs(markerLng - center.lng);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestMarker = m;
+              }
+            }
+          });
+
+          if (bestMarker) {
+            bestMarker.openTooltip();
+          }
+        }, targetZoom > map.getZoom() ? 600 : 150);
+      }
     } catch (e) {
       console.error('Failed to fetch cities', e);
     }
@@ -523,6 +892,9 @@
     currentLat = lat;
     currentLng = lng;
 
+    // Set searched city as reference
+    updateReferenceCity(city);
+
     selectedCityEl.textContent = name;
     selectedCountryEl.textContent = country;
     selectedLatEl.textContent = formatLat(lat);
@@ -537,6 +909,7 @@
 
       updatePopStats(lat, allCities);
       updateCitiesList(getVisibleCities());
+      updateMobileCities(allCities, name);
       citiesPanel.classList.remove('hidden');
       updateMap(lat, lng, city, filtered);
     } catch (e) {
@@ -587,8 +960,8 @@
     const northRounded = Math.max(0.1, Math.round(stats.percentNorth * 10) / 10);
     const southRounded = Math.max(0.1, Math.min(99.9, Math.round((100 - northRounded) * 10) / 10));
 
-    popNorthBig.innerHTML = northRounded.toFixed(1) + '%<span class="pop-label"> pop to north</span>';
-    popSouthBig.innerHTML = southRounded.toFixed(1) + '%<span class="pop-label"> pop to south</span>';
+    popNorthBig.innerHTML = northRounded.toFixed(1) + '%<span class="pop-label"> live north of here</span>';
+    popSouthBig.innerHTML = southRounded.toFixed(1) + '%<span class="pop-label"> live south of here</span>';
     popNorthBig.classList.remove('hidden');
     popSouthBig.classList.remove('hidden');
 
@@ -597,6 +970,9 @@
       <span class="pop-text"> ±${formatPopulation(errorMargin)} at this latitude</span>
     `;
     popStats.classList.remove('hidden');
+
+    // Update mobile pop stat
+    updateMobilePopStat(estimatedBandPop, errorMargin);
 
     setTimeout(updateLabelPositions, 100);
   }
@@ -633,9 +1009,9 @@
   function updateCitiesList(cities) {
     const bounds = map.getBounds();
     citiesList.innerHTML = cities.slice(0, 100).map(city => {
-      const { name, country, lat, lng, population, avg_temp } = city;
+      const { name, country, lat, lng, population, avg_temp, min_temp, max_temp } = city;
       const distStr = formatDistance(lat, currentLat);
-      const tempStr = formatTemp(avg_temp);
+      const tempRangeStr = formatTempRange(min_temp, max_temp);
       const inViewport = lng >= bounds.getWest() && lng <= bounds.getEast();
       const offscreenClass = inViewport ? '' : ' offscreen';
       return `
@@ -647,7 +1023,7 @@
           <div class="meta">
             <span class="pop">${formatPopulation(population)} pop</span>
             <span class="dist">${distStr}</span>
-            <span class="temp" title="Average annual temperature (WorldClim)">${tempStr}</span>
+            <span class="temp" title="Temperature range: coldest/warmest month (WorldClim)">${tempRangeStr}</span>
           </div>
         </li>
       `;
@@ -665,7 +1041,6 @@
         });
 
         if (marker) {
-          highlightSelectedMarker(marker);
           marker.openTooltip();
         }
 
@@ -696,35 +1071,153 @@
     return 4 + ratio * 8;
   }
 
+  // Dynamic world wrapping - track which offsets each marker has
+  // Each marker entry: { city, options, tooltipContent, markers: { offset: leafletMarker } }
+  let markerRegistry = [];
+
+  // Calculate which world offsets are needed for current viewport (with buffer)
+  function getNeededOffsets() {
+    const bounds = map.getBounds();
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+
+    // Add buffer of 1 world width on each side
+    const bufferedWest = west - 360;
+    const bufferedEast = east + 360;
+
+    const offsets = [];
+    // Start from a multiple of 360 below bufferedWest
+    const startOffset = Math.floor(bufferedWest / 360) * 360;
+    for (let offset = startOffset; offset <= bufferedEast; offset += 360) {
+      offsets.push(offset);
+    }
+    return offsets;
+  }
+
+  // Create a single marker at a specific offset
+  function createMarkerAtOffset(city, options, tooltipContent, offset) {
+    const marker = L.circleMarker([city.lat, city.lng + offset], options).addTo(map);
+    marker.bindTooltip(tooltipContent, {
+      permanent: false,
+      direction: 'top',
+      className: 'city-tooltip'
+    });
+    marker._origColor = options.fillColor;
+    marker._cityData = city;
+    marker._worldOffset = offset;
+    return marker;
+  }
+
+  // Register a city marker (creates at current needed offsets)
+  function registerCityMarker(city, options, tooltipContent) {
+    const entry = {
+      city,
+      options,
+      tooltipContent,
+      markers: {}
+    };
+
+    const neededOffsets = getNeededOffsets();
+    neededOffsets.forEach(offset => {
+      const marker = createMarkerAtOffset(city, options, tooltipContent, offset);
+      entry.markers[offset] = marker;
+      cityMarkers.push(marker);
+    });
+
+    markerRegistry.push(entry);
+  }
+
+  // Update all markers for current viewport
+  function updateWorldWrappedMarkers() {
+    const neededOffsets = getNeededOffsets();
+    const neededSet = new Set(neededOffsets);
+
+    markerRegistry.forEach(entry => {
+      // Add markers for new offsets
+      neededOffsets.forEach(offset => {
+        if (!entry.markers[offset]) {
+          const marker = createMarkerAtOffset(entry.city, entry.options, entry.tooltipContent, offset);
+          entry.markers[offset] = marker;
+          cityMarkers.push(marker);
+        }
+      });
+
+      // Remove markers for offsets no longer needed
+      Object.keys(entry.markers).forEach(offsetStr => {
+        const offset = parseInt(offsetStr);
+        if (!neededSet.has(offset)) {
+          const marker = entry.markers[offset];
+          map.removeLayer(marker);
+          const idx = cityMarkers.indexOf(marker);
+          if (idx > -1) cityMarkers.splice(idx, 1);
+          delete entry.markers[offset];
+        }
+      });
+    });
+
+    // Also update latitude line if needed
+    updateLatitudeLineForViewport();
+  }
+
+  // Update latitude line to cover viewport
+  function updateLatitudeLineForViewport() {
+    if (currentLat === null || !latitudeLine) return;
+
+    const bounds = map.getBounds();
+    const west = bounds.getWest() - 720;
+    const east = bounds.getEast() + 720;
+
+    // Update the polygon bounds
+    const halfWidth = 0.5;
+    latitudeLine.setLatLngs([
+      [currentLat - halfWidth, west],
+      [currentLat - halfWidth, east],
+      [currentLat + halfWidth, east],
+      [currentLat + halfWidth, west]
+    ]);
+  }
+
   // Redraw markers when zoom changes
   function redrawMarkers(cities) {
-    clearSelectedMarker();
+    // Clear existing markers and registry
     cityMarkers.forEach(m => map.removeLayer(m));
     cityMarkers = [];
+    markerRegistry = [];
 
     cities.forEach(city => {
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
       const distStr = formatDistance(city.lat, currentLat);
-      const tempStr = formatTemp(city.avg_temp);
+      const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
+      const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`;
 
-      const marker = L.circleMarker([city.lat, city.lng], {
+      registerCityMarker(city, {
         radius: markerRadius,
         fillColor: markerColor,
         fillOpacity: 0.9,
         stroke: false,
-        interactive: false  // Allow clicks to pass through to map
-      }).addTo(map);
-
-      marker.bindTooltip(
-        `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempStr}`,
-        { permanent: false, direction: 'top', className: 'city-tooltip' }
-      );
-
-      marker._origColor = markerColor;
-      marker._cityData = city;
-      cityMarkers.push(marker);
+        interactive: false
+      }, tooltipContent);
     });
+  }
+
+  // Create static markers at needed offsets (for selected marker, doesn't need dynamic updating)
+  function createStaticWrappedMarkers(city, options, tooltipContent) {
+    const markers = [];
+    const neededOffsets = getNeededOffsets();
+    neededOffsets.forEach(offset => {
+      const marker = L.circleMarker([city.lat, city.lng + offset], options).addTo(map);
+      marker.bindTooltip(tooltipContent, {
+        permanent: false,
+        direction: 'top',
+        className: 'city-tooltip'
+      });
+      marker._origColor = options.fillColor;
+      marker._cityData = city;
+      marker._worldOffset = offset;
+      markers.push(marker);
+    });
+    return markers;
   }
 
   function updateMapForLatitude(lat, lng, matchingCities) {
@@ -733,26 +1226,18 @@
 
     matchingCities.forEach(city => {
       const distStr = formatDistance(city.lat, currentLat);
-      const tempStr = formatTemp(city.avg_temp);
+      const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
+      const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`;
 
-      const marker = L.circleMarker([city.lat, city.lng], {
+      registerCityMarker(city, {
         radius: markerRadius,
         fillColor: markerColor,
         fillOpacity: 0.9,
         stroke: false,
-        interactive: false  // Allow clicks to pass through to map
-      }).addTo(map);
-
-      marker.bindTooltip(
-        `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempStr}`,
-        { permanent: false, direction: 'top', className: 'city-tooltip' }
-      );
-
-      marker._origColor = markerColor;
-      marker._cityData = city;
-      cityMarkers.push(marker);
+        interactive: false
+      }, tooltipContent);
     });
 
     map.setView([lat, lng], map.getZoom(), { animate: true, duration: 0.3 });
@@ -762,43 +1247,32 @@
     clearMapLayers();
     drawLatitudeLine(lat);
 
-    const tempStr = formatTemp(selectedCity.avg_temp);
+    const tempRangeStr = formatTempRange(selectedCity.min_temp, selectedCity.max_temp);
+    const selectedTooltip = `<strong>${selectedCity.name}</strong><br>${formatPopulation(selectedCity.population)} pop<br>${tempRangeStr}`;
 
-    selectedMarker = L.circleMarker([selectedCity.lat, selectedCity.lng], {
+    // Create selected marker on all world tiles
+    selectedMarkers = createStaticWrappedMarkers(selectedCity, {
       radius: getMarkerRadius(selectedCity.population) + 4,
       fillColor: '#fb923c',
       fillOpacity: 1,
       stroke: false,
-      interactive: false  // Allow clicks to pass through to map
-    }).addTo(map);
-
-    selectedMarker.bindTooltip(
-      `<strong>${selectedCity.name}</strong><br>${formatPopulation(selectedCity.population)} pop<br>${tempStr}`,
-      { permanent: false, direction: 'top', className: 'city-tooltip' }
-    );
+      interactive: false
+    }, selectedTooltip);
 
     matchingCities.forEach(city => {
       const distStr = formatDistance(city.lat, currentLat);
-      const cTempStr = formatTemp(city.avg_temp);
+      const cTempRangeStr = formatTempRange(city.min_temp, city.max_temp);
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
+      const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${cTempRangeStr}`;
 
-      const marker = L.circleMarker([city.lat, city.lng], {
+      registerCityMarker(city, {
         radius: markerRadius,
         fillColor: markerColor,
         fillOpacity: 0.9,
         stroke: false,
-        interactive: false  // Allow clicks to pass through to map
-      }).addTo(map);
-
-      marker.bindTooltip(
-        `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${cTempStr}`,
-        { permanent: false, direction: 'top', className: 'city-tooltip' }
-      );
-
-      marker._origColor = markerColor;
-      marker._cityData = city;
-      cityMarkers.push(marker);
+        interactive: false
+      }, tooltipContent);
     });
 
     const targetZoom = Math.min(Math.max(map.getZoom(), 3), MAX_ZOOM);
@@ -807,12 +1281,16 @@
 
   function drawLatitudeLine(lat) {
     const halfWidth = 0.5;
-    // Extend to cover 3 world tiles (left, center, right) for seamless wrapping
+    // Use viewport bounds with large buffer for seamless wrapping
+    const bounds = map.getBounds();
+    const west = bounds.getWest() - 720;
+    const east = bounds.getEast() + 720;
+
     latitudeLine = L.polygon([
-      [lat - halfWidth, -540],
-      [lat - halfWidth, 540],
-      [lat + halfWidth, 540],
-      [lat + halfWidth, -540]
+      [lat - halfWidth, west],
+      [lat - halfWidth, east],
+      [lat + halfWidth, east],
+      [lat + halfWidth, west]
     ], {
       stroke: false,
       fillColor: 'rgba(255, 255, 255, 0.15)',
@@ -825,13 +1303,11 @@
       map.removeLayer(latitudeLine);
       latitudeLine = null;
     }
-    if (selectedMarker) {
-      map.removeLayer(selectedMarker);
-      selectedMarker = null;
-    }
+    selectedMarkers.forEach(m => map.removeLayer(m));
+    selectedMarkers = [];
     cityMarkers.forEach(m => map.removeLayer(m));
     cityMarkers = [];
-    selectedCityMarker = null;
+    markerRegistry = [];
   }
 
   function formatLat(lat) {
@@ -863,7 +1339,7 @@
     return Math.round(km) + 'km ' + dir;
   }
 
-  // Format temperature from WorldClim avg_temp data
+  // Format temperature from WorldClim data
   function formatTemp(avgTempC) {
     if (avgTempC === null || avgTempC === undefined) return '';
 
@@ -877,6 +1353,31 @@
     }
 
     return `${temp}${unit}`;
+  }
+
+  // Format temperature range (min/max)
+  function formatTempRange(minTempC, maxTempC) {
+    if ((minTempC === null || minTempC === undefined) &&
+        (maxTempC === null || maxTempC === undefined)) return '';
+
+    let minTemp, maxTemp, unit;
+    if (tempUnit === 'f') {
+      minTemp = minTempC !== null ? Math.round(minTempC * 9/5 + 32) : null;
+      maxTemp = maxTempC !== null ? Math.round(maxTempC * 9/5 + 32) : null;
+      unit = '°F';
+    } else {
+      minTemp = minTempC !== null ? Math.round(minTempC) : null;
+      maxTemp = maxTempC !== null ? Math.round(maxTempC) : null;
+      unit = '°C';
+    }
+
+    if (minTemp !== null && maxTemp !== null) {
+      return `${minTemp}/${maxTemp}${unit}`;
+    } else if (maxTemp !== null) {
+      return `max ${maxTemp}${unit}`;
+    } else {
+      return `min ${minTemp}${unit}`;
+    }
   }
 
   if (document.readyState === 'loading') {
