@@ -199,15 +199,14 @@ body {
 /* Big percentage displays */
 .pop-big {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 3.5vw;
   font-family: 'IBM Plex Mono', monospace;
   font-size: clamp(16px, 4vw, 32px);
   font-weight: 600;
   z-index: 501;
   text-shadow: 0 2px 20px rgba(0,0,0,0.5);
   pointer-events: none;
-  opacity: 0.25;
+  opacity: 0.6;
 }
 
 .pop-big.north {
@@ -832,9 +831,20 @@ body {
     display: none !important;
   }
 
-  /* Adjust pop-big labels for mobile - 1.5x larger */
+  /* Adjust pop-big labels for mobile */
   .pop-big {
-    font-size: clamp(18px, 4.5vw, 27px);
+    font-size: clamp(24px, 6vw, 36px);
+    opacity: 0.9;
+    left: 3.5vw;
+    transform: none;
+  }
+
+  .pop-big.north {
+    transform: translateY(-10vh);
+  }
+
+  .pop-big.south {
+    transform: translateY(10vh);
   }
 
   /* Adjust map for bottom panel */

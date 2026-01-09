@@ -345,6 +345,19 @@
     const displayName = city ? city.name : '';
     mobileReferenceCity.textContent = displayName;
     desktopReferenceCity.textContent = displayName;
+
+    // Update north/south labels with new place name
+    if (!popNorthBig.classList.contains('hidden')) {
+      const placeName = city ? city.name : 'here';
+      const northText = popNorthBig.innerHTML.match(/^[\d.]+%/);
+      const southText = popSouthBig.innerHTML.match(/^[\d.]+%/);
+      if (northText) {
+        popNorthBig.innerHTML = northText[0] + '<span class="pop-label"> live north of ' + placeName + '</span>';
+      }
+      if (southText) {
+        popSouthBig.innerHTML = southText[0] + '<span class="pop-label"> live south of ' + placeName + '</span>';
+      }
+    }
   }
 
   // Find best city near a lat/lng point (balancing distance and population)
@@ -586,8 +599,13 @@
         if (dist <= tapRadius) {
           // Use the already highlighted marker's city
           const city = highlightedMarker._cityData;
+          const marker = highlightedMarker;
           updateReferenceCity(city);
           map.panTo([city.lat, city.lng], { duration: 0.3 });
+          // Keep tooltip open after pan
+          setTimeout(() => {
+            marker.openTooltip();
+          }, 350);
           return; // Don't move band
         }
       }
@@ -989,8 +1007,9 @@
     const northRounded = Math.max(0.1, Math.round(stats.percentNorth * 10) / 10);
     const southRounded = Math.max(0.1, Math.min(99.9, Math.round((100 - northRounded) * 10) / 10));
 
-    popNorthBig.innerHTML = northRounded.toFixed(1) + '%<span class="pop-label"> live north of here</span>';
-    popSouthBig.innerHTML = southRounded.toFixed(1) + '%<span class="pop-label"> live south of here</span>';
+    const placeName = referenceCity ? referenceCity.name : 'here';
+    popNorthBig.innerHTML = northRounded.toFixed(1) + '%<span class="pop-label"> live north of ' + placeName + '</span>';
+    popSouthBig.innerHTML = southRounded.toFixed(1) + '%<span class="pop-label"> live south of ' + placeName + '</span>';
     popNorthBig.classList.remove('hidden');
     popSouthBig.classList.remove('hidden');
 
@@ -1393,15 +1412,15 @@
     if (tempUnit === 'f') {
       minTemp = minTempC !== null ? Math.round(minTempC * 9/5 + 32) : null;
       maxTemp = maxTempC !== null ? Math.round(maxTempC * 9/5 + 32) : null;
-      unit = '°F';
+      unit = '°';
     } else {
       minTemp = minTempC !== null ? Math.round(minTempC) : null;
       maxTemp = maxTempC !== null ? Math.round(maxTempC) : null;
-      unit = '°C';
+      unit = '°';
     }
 
     if (minTemp !== null && maxTemp !== null) {
-      return `${minTemp}/${maxTemp}${unit}`;
+      return `avg ${minTemp}/${maxTemp}${unit}`;
     } else if (maxTemp !== null) {
       return `max ${maxTemp}${unit}`;
     } else {

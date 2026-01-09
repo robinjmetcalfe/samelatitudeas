@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=<?= filemtime('css/style.css') ?>">
 </head>
 <body>
 
@@ -118,8 +118,8 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="js/population.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/population.js?v=<?= filemtime('js/population.js') ?>"></script>
+  <script src="js/app.js?v=<?= filemtime('js/app.js') ?>"></script>
 
 </body>
 </html>
