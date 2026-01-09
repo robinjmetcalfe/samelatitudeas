@@ -1,0 +1,8 @@
+{
+  "name": "Latitude Explorer",
+  "description": "Explore cities around the world that share your latitude. See who lives north and south of you.",
+  "status": "active",
+  "tags": ["map", "geography", "data-visualization"],
+  "created": "2026-01-09",
+  "stack": ["HTML", "CSS", "JavaScript", "Leaflet", "OpenStreetMap"]
+}

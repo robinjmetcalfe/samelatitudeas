@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Latitude Explorer</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>Latitude</h1>
+        <div class="search-wrapper">
+          <input
+            type="text"
+            id="city-search"
+            placeholder="Search city..."
+            autocomplete="off"
+            spellcheck="false"
+          >
+          <div id="search-dropdown" class="dropdown hidden"></div>
+        </div>
+      </div>
+
+      <div id="location-info" class="location-info hidden">
+        <span id="selected-city" class="city-name"></span>
+        <span id="selected-country" class="country-name"></span>
+        <span id="selected-lat" class="lat-value"></span>
+      </div>
+
+      <div class="unit-toggles">
+        <select id="min-pop" title="Minimum population">
+          <option value="50000">50k+</option>
+          <option value="100000">100k+</option>
+          <option value="500000" selected>500k+</option>
+          <option value="1000000">1M+</option>
+          <option value="5000000">5M+</option>
+        </select>
+        <select id="temp-unit">
+          <option value="c">°C</option>
+          <option value="f">°F</option>
+        </select>
+        <select id="dist-unit">
+          <option value="km">km</option>
+          <option value="mi">mi</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- Main content -->
+    <main class="main">
+      <!-- Map -->
+      <div class="map-container">
+        <div id="pop-north-big" class="pop-big north hidden"></div>
+        <div id="pop-stats" class="pop-stats hidden"></div>
+        <div id="pop-south-big" class="pop-big south hidden"></div>
+        <div id="map"></div>
+      </div>
+
+      <!-- Side panel -->
+      <aside id="cities-panel" class="cities-panel hidden">
+        <div class="panel-header">
+          <span class="panel-title">Same Latitude</span>
+        </div>
+        <ul id="cities-list" class="cities-list"></ul>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      Data: Cities & populations from GeoNames/SimpleMaps. Temperature estimates based on latitude (approximate). Population distribution derived from WorldPop/UN data.
+    </footer>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="js/population.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>
