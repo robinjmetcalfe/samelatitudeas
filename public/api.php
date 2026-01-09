@@ -40,7 +40,7 @@ switch ($action) {
         $tolerance = floatval($_GET['tolerance'] ?? 0.5);
         $minPop = intval($_GET['minPop'] ?? 50000);
 
-        $stmt = $db->prepare('SELECT name, country, lat, lng, population FROM cities WHERE lat BETWEEN ? AND ? AND population >= ? ORDER BY population DESC LIMIT 150');
+        $stmt = $db->prepare('SELECT name, country, lat, lng, population FROM cities WHERE lat BETWEEN ? AND ? AND population >= ? ORDER BY population DESC LIMIT 300');
         $stmt->bindValue(1, $lat - $tolerance, SQLITE3_FLOAT);
         $stmt->bindValue(2, $lat + $tolerance, SQLITE3_FLOAT);
         $stmt->bindValue(3, $minPop, SQLITE3_INTEGER);

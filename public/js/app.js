@@ -17,7 +17,6 @@
   const citiesList = document.getElementById('cities-list');
   const tempUnitSelect = document.getElementById('temp-unit');
   const distUnitSelect = document.getElementById('dist-unit');
-  const minPopSelect = document.getElementById('min-pop');
 
   // State
   let map;
@@ -25,23 +24,37 @@
   let cityMarkers = [];
   let selectedMarker = null;
   let isDragging = false;
-  let mouseDownPos = null;
   let currentLat = null;
   let currentLng = null;
   let currentCities = [];
+  let allCitiesAtLat = []; // Full cache of cities at current latitude
 
   // Population stats for marker sizing
-  let popMin = 50000;
-  let popMax = 40000000;
+  let popMin = 1000;
+  let popMax = 25000000;
 
   // User preferences
   let tempUnit = localStorage.getItem('tempUnit') || 'c';
   let distUnit = localStorage.getItem('distUnit') || 'km';
-  let minPopFilter = parseInt(localStorage.getItem('minPop')) || 500000;
 
   const LAT_TOLERANCE = 0.5;
-  const MAX_ZOOM = 5;
+  const MAX_ZOOM = 10;
   const MIN_ZOOM = 2;
+
+  // Cache for latitude queries: { "lat_minPop": [cities] }
+  const latCache = new Map();
+  const CACHE_MAX_SIZE = 20;
+
+  // Get minimum population based on zoom level
+  function getMinPopForZoom(zoom) {
+    if (zoom >= 8) return 5000;
+    if (zoom >= 7) return 10000;
+    if (zoom >= 6) return 25000;
+    if (zoom >= 5) return 50000;
+    if (zoom >= 4) return 100000;
+    if (zoom >= 3) return 250000;
+    return 500000;
+  }
 
   // Init
   function init() {
@@ -56,8 +69,8 @@
     try {
       const res = await fetch('api.php?action=stats');
       const data = await res.json();
-      popMin = data.min_pop || 50000;
-      popMax = data.max_pop || 40000000;
+      popMin = data.min_pop || 1000;
+      popMax = data.max_pop || 25000000;
     } catch (e) {
       console.error('Failed to fetch pop stats', e);
     }
@@ -66,7 +79,6 @@
   function initUnitToggles() {
     tempUnitSelect.value = tempUnit;
     distUnitSelect.value = distUnit;
-    minPopSelect.value = minPopFilter;
 
     tempUnitSelect.addEventListener('change', function() {
       tempUnit = this.value;
@@ -79,24 +91,31 @@
       localStorage.setItem('distUnit', distUnit);
       if (currentCities.length) refreshDisplay();
     });
-
-    minPopSelect.addEventListener('change', function() {
-      minPopFilter = parseInt(this.value);
-      localStorage.setItem('minPop', minPopFilter);
-      if (currentLat !== null) {
-        selectLatitude(currentLat, currentLng);
-      }
-    });
   }
 
   function refreshDisplay() {
     if (currentCities.length && currentLat !== null) {
-      updateCitiesList(currentCities);
+      updateCitiesList(getVisibleCities());
+      updateMarkerTooltips();
     }
   }
 
+  // Update tooltips when units change
+  function updateMarkerTooltips() {
+    cityMarkers.forEach(marker => {
+      const city = marker._cityData;
+      if (city) {
+        const distStr = formatDistance(city.lat, currentLat);
+        const tempStr = formatTemps(estimateTemps(city.lat));
+        marker.setTooltipContent(
+          `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempStr}`
+        );
+      }
+    });
+  }
+
   let highlightedMarker = null;
-  let selectedCityMarker = null; // For search/click selection highlight
+  let selectedCityMarker = null;
 
   function initMap() {
     map = L.map('map', {
@@ -115,19 +134,31 @@
 
     map.zoomControl.setPosition('topright');
 
-    // Update label positions when map moves
-    map.on('move zoom', updateLabelPositions);
+    // Update on map move/zoom
+    map.on('move', updateLabelPositions);
+    map.on('zoomend', onZoomEnd);
 
     // Proximity-based marker highlighting
     map.on('mousemove', handleProximityHighlight);
     map.getContainer().addEventListener('mouseleave', clearProximityHighlight);
   }
 
+  // On zoom change, update visible cities
+  function onZoomEnd() {
+    if (currentLat !== null && allCitiesAtLat.length > 0) {
+      const minPop = getMinPopForZoom(map.getZoom());
+      const filtered = allCitiesAtLat.filter(c => c.population >= minPop);
+      currentCities = filtered;
+      updateCitiesList(getVisibleCities());
+      redrawMarkers(filtered);
+    }
+  }
+
   function handleProximityHighlight(e) {
     if (cityMarkers.length === 0) return;
 
     const mousePoint = e.containerPoint;
-    const maxDistPx = window.innerWidth * 0.025; // 2.5vw in pixels
+    const maxDistPx = window.innerWidth * 0.025;
 
     let nearestMarker = null;
     let nearestDist = Infinity;
@@ -144,8 +175,7 @@
       }
     });
 
-    // Clear previous highlight
-    if (highlightedMarker && highlightedMarker !== nearestMarker) {
+    if (highlightedMarker && highlightedMarker !== nearestMarker && highlightedMarker !== selectedCityMarker) {
       highlightedMarker.setStyle({
         fillColor: highlightedMarker._origColor,
         fillOpacity: 0.9
@@ -153,22 +183,21 @@
       highlightedMarker.closeTooltip();
     }
 
-    // Highlight nearest marker
-    if (nearestMarker) {
-      const glow = 1 - (nearestDist / maxDistPx); // 1 when close, 0 when far
+    if (nearestMarker && nearestMarker !== selectedCityMarker) {
+      const glow = 1 - (nearestDist / maxDistPx);
       nearestMarker.setStyle({
         fillColor: '#ffffff',
         fillOpacity: 0.5 + glow * 0.5
       });
       nearestMarker.openTooltip();
       highlightedMarker = nearestMarker;
-    } else {
+    } else if (!nearestMarker) {
       highlightedMarker = null;
     }
   }
 
   function clearProximityHighlight() {
-    if (highlightedMarker) {
+    if (highlightedMarker && highlightedMarker !== selectedCityMarker) {
       highlightedMarker.setStyle({
         fillColor: highlightedMarker._origColor,
         fillOpacity: 0.9
@@ -187,77 +216,58 @@
     const topPoint = map.latLngToContainerPoint([bandTop, 0]);
     const bottomPoint = map.latLngToContainerPoint([bandBottom, 0]);
 
-    // Position north label above band, south label below band - equidistant
+    const gap = window.innerHeight * 0.025;
     const labelHeight = 30;
-    const gap = 8;
     popNorthBig.style.top = Math.max(10, topPoint.y - labelHeight - gap) + 'px';
     popSouthBig.style.top = Math.min(bottomPoint.y + gap, map.getContainer().offsetHeight - labelHeight) + 'px';
   }
 
   function initMapClick() {
-    let mouseDownPoint = null;
-
-    map.on('mousedown', function(e) {
-      mouseDownPos = e.latlng;
-      mouseDownPoint = e.containerPoint;
-      isDragging = false;
+    map.on('dragstart', function() {
+      isDragging = true;
     });
 
-    map.on('mousemove', function(e) {
-      if (mouseDownPoint) {
+    map.on('dragend', function() {
+      setTimeout(() => { isDragging = false; }, 50);
+    });
+
+    map.on('click', function(e) {
+      if (isDragging) return;
+
+      const clickPoint = e.containerPoint;
+      const maxDistPx = window.innerWidth * 0.05;
+
+      let nearestMarker = null;
+      let nearestDist = Infinity;
+
+      cityMarkers.forEach(marker => {
+        const markerPoint = map.latLngToContainerPoint(marker.getLatLng());
         const dist = Math.sqrt(
-          Math.pow(e.containerPoint.x - mouseDownPoint.x, 2) +
-          Math.pow(e.containerPoint.y - mouseDownPoint.y, 2)
+          Math.pow(clickPoint.x - markerPoint.x, 2) +
+          Math.pow(clickPoint.y - markerPoint.y, 2)
         );
-        if (dist > 5) isDragging = true; // 5 pixels threshold
-      }
-    });
-
-    map.on('mouseup', function(e) {
-      if (!isDragging && mouseDownPos) {
-        // Check if click is near an existing city marker
-        const clickPoint = e.containerPoint;
-        const maxDistPx = window.innerWidth * 0.05; // 5vw
-
-        let nearestMarker = null;
-        let nearestDist = Infinity;
-
-        cityMarkers.forEach(marker => {
-          const markerPoint = map.latLngToContainerPoint(marker.getLatLng());
-          const dist = Math.sqrt(
-            Math.pow(clickPoint.x - markerPoint.x, 2) +
-            Math.pow(clickPoint.y - markerPoint.y, 2)
-          );
-          if (dist < nearestDist && dist <= maxDistPx) {
-            nearestDist = dist;
-            nearestMarker = marker;
-          }
-        });
-
-        if (nearestMarker) {
-          // Select the nearby city
-          highlightSelectedMarker(nearestMarker);
-          nearestMarker.openTooltip();
-        } else {
-          // Select latitude at click point
-          selectLatitude(e.latlng.lat, e.latlng.lng);
+        if (dist < nearestDist && dist <= maxDistPx) {
+          nearestDist = dist;
+          nearestMarker = marker;
         }
+      });
+
+      if (nearestMarker) {
+        highlightSelectedMarker(nearestMarker);
+        nearestMarker.openTooltip();
+      } else {
+        selectLatitude(e.latlng.lat, e.latlng.lng);
       }
-      mouseDownPos = null;
-      mouseDownPoint = null;
-      isDragging = false;
     });
   }
 
   function highlightSelectedMarker(marker) {
-    // Clear previous selection
     if (selectedCityMarker && selectedCityMarker !== marker) {
       selectedCityMarker.setStyle({
         fillColor: selectedCityMarker._origColor,
         fillOpacity: 0.9
       });
     }
-    // Highlight new selection with cyan glow
     marker.setStyle({
       fillColor: '#22d3ee',
       fillOpacity: 1
@@ -275,6 +285,39 @@
     }
   }
 
+  // Get cache key for latitude query
+  function getCacheKey(lat) {
+    return Math.round(lat * 10) / 10; // Round to 0.1 degree
+  }
+
+  // Fetch cities with caching
+  async function fetchCitiesAtLatitude(lat) {
+    const cacheKey = getCacheKey(lat);
+
+    if (latCache.has(cacheKey)) {
+      return latCache.get(cacheKey);
+    }
+
+    // Fetch with low minPop to get most cities for caching
+    const res = await fetch(`api.php?action=latitude&lat=${lat}&tolerance=${LAT_TOLERANCE}&minPop=5000`);
+    const cities = await res.json();
+
+    // Manage cache size
+    if (latCache.size >= CACHE_MAX_SIZE) {
+      const firstKey = latCache.keys().next().value;
+      latCache.delete(firstKey);
+    }
+    latCache.set(cacheKey, cities);
+
+    return cities;
+  }
+
+  // Clear cache (for debugging)
+  window.clearLatCache = function() {
+    latCache.clear();
+    console.log('Latitude cache cleared');
+  };
+
   async function selectLatitude(lat, lng) {
     searchInput.value = '';
     currentLat = lat;
@@ -285,15 +328,18 @@
     selectedLatEl.textContent = formatLat(lat);
     locationInfo.classList.remove('hidden');
 
-    // Fetch cities from API
     try {
-      const res = await fetch(`api.php?action=latitude&lat=${lat}&tolerance=${LAT_TOLERANCE}&minPop=${minPopFilter}`);
-      const matchingCities = await res.json();
-      currentCities = matchingCities;
-      updatePopStats(lat, matchingCities);
-      updateCitiesList(matchingCities);
+      const allCities = await fetchCitiesAtLatitude(lat);
+      allCitiesAtLat = allCities;
+
+      const minPop = getMinPopForZoom(map.getZoom());
+      const filtered = allCities.filter(c => c.population >= minPop);
+      currentCities = filtered;
+
+      updatePopStats(lat, allCities);
+      updateCitiesList(getVisibleCities());
       citiesPanel.classList.remove('hidden');
-      updateMapForLatitude(lat, lng, matchingCities);
+      updateMapForLatitude(lat, lng, filtered);
     } catch (e) {
       console.error('Failed to fetch cities', e);
     }
@@ -313,7 +359,6 @@
         return;
       }
 
-      // Debounce API calls
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(async () => {
         try {
@@ -416,17 +461,18 @@
     selectedLatEl.textContent = formatLat(lat);
     locationInfo.classList.remove('hidden');
 
-    // Fetch cities at this latitude
     try {
-      const res = await fetch(`api.php?action=latitude&lat=${lat}&tolerance=${LAT_TOLERANCE}&minPop=${minPopFilter}`);
-      const matchingCities = await res.json();
-      // Exclude selected city from list
-      const otherCities = matchingCities.filter(c => c.name !== name);
-      currentCities = otherCities;
-      updatePopStats(lat, matchingCities);
-      updateCitiesList(otherCities);
+      const allCities = await fetchCitiesAtLatitude(lat);
+      allCitiesAtLat = allCities;
+
+      const minPop = getMinPopForZoom(map.getZoom());
+      const filtered = allCities.filter(c => c.population >= minPop && c.name !== name);
+      currentCities = filtered;
+
+      updatePopStats(lat, allCities);
+      updateCitiesList(getVisibleCities());
       citiesPanel.classList.remove('hidden');
-      updateMap(lat, lng, city, otherCities);
+      updateMap(lat, lng, city, filtered);
     } catch (e) {
       console.error('Failed to fetch cities', e);
     }
@@ -436,25 +482,19 @@
     const stats = getPopulationStats(lat);
     const statsAbove = getPopulationStats(lat + 1);
 
-    // Calculate band population using latitude data
-    // World pop ~8 billion, band is 1 degree
-    // Difference in percentNorth between adjacent latitudes gives us band %
     const bandPercent = Math.abs(stats.percentNorth - statsAbove.percentNorth);
     const worldPop = 8000000000;
     const estimatedBandPop = Math.round(bandPercent / 100 * worldPop);
-    const errorMargin = Math.round(estimatedBandPop * 0.3); // 30% margin
+    const errorMargin = Math.round(estimatedBandPop * 0.3);
 
-    // Ensure percentages add to 100%
-    const northRounded = Math.round(stats.percentNorth * 10) / 10;
-    const southRounded = Math.round((100 - northRounded) * 10) / 10;
+    const northRounded = Math.max(0.1, Math.round(stats.percentNorth * 10) / 10);
+    const southRounded = Math.max(0.1, Math.min(99.9, Math.round((100 - northRounded) * 10) / 10));
 
-    // Big percentage displays
     popNorthBig.innerHTML = northRounded.toFixed(1) + '%<span class="pop-label"> pop to north</span>';
     popSouthBig.innerHTML = southRounded.toFixed(1) + '%<span class="pop-label"> pop to south</span>';
     popNorthBig.classList.remove('hidden');
     popSouthBig.classList.remove('hidden');
 
-    // Stats bar
     popStats.innerHTML = `
       <span class="pop-value band">${formatPopulation(estimatedBandPop)}</span>
       <span class="pop-text"> ±${formatPopulation(errorMargin)} at this latitude</span>
@@ -464,14 +504,21 @@
     setTimeout(updateLabelPositions, 100);
   }
 
+  // Get cities currently visible in viewport
+  function getVisibleCities() {
+    const bounds = map.getBounds();
+    return currentCities.filter(city => {
+      return city.lng >= bounds.getWest() && city.lng <= bounds.getEast();
+    });
+  }
+
   function updateCitiesList(cities) {
-    citiesList.innerHTML = cities.map(city => {
+    citiesList.innerHTML = cities.slice(0, 100).map(city => {
       const { name, country, lat, lng, population } = city;
       const distStr = formatDistance(lat, currentLat);
-      const temps = estimateTemps(lat);
-      const tempStr = formatTemps(temps);
+      const tempStr = formatTemps(estimateTemps(lat));
       return `
-        <li class="city-item" data-lat="${lat}" data-lng="${lng}">
+        <li class="city-item" data-lat="${lat}" data-lng="${lng}" data-name="${name}">
           <div class="info">
             <div class="name">${name}</div>
             <div class="country">${country}</div>
@@ -489,11 +536,11 @@
       item.addEventListener('click', function() {
         const lat = parseFloat(this.dataset.lat);
         const lng = parseFloat(this.dataset.lng);
+        const name = this.dataset.name;
 
-        // Find and highlight the corresponding marker
         const marker = cityMarkers.find(m => {
           const d = m._cityData;
-          return d && Math.abs(d.lat - lat) < 0.001 && Math.abs(d.lng - lng) < 0.001;
+          return d && d.name === name && Math.abs(d.lat - lat) < 0.001;
         });
 
         if (marker) {
@@ -506,14 +553,12 @@
     });
   }
 
-  // Get marker color based on population (blue -> orange)
   function getMarkerColor(pop) {
     const logMin = Math.log(popMin);
     const logMax = Math.log(popMax);
     const logPop = Math.log(Math.max(pop, popMin));
-    const ratio = (logPop - logMin) / (logMax - logMin);
+    const ratio = Math.min(1, Math.max(0, (logPop - logMin) / (logMax - logMin)));
 
-    // Blue (96, 165, 250) -> Orange (251, 146, 60)
     const r = Math.round(96 + ratio * (251 - 96));
     const g = Math.round(165 + ratio * (146 - 165));
     const b = Math.round(250 + ratio * (60 - 250));
@@ -521,53 +566,72 @@
     return `rgb(${r}, ${g}, ${b})`;
   }
 
-  // Get marker radius based on population
   function getMarkerRadius(pop) {
     const logMin = Math.log(popMin);
     const logMax = Math.log(popMax);
     const logPop = Math.log(Math.max(pop, popMin));
-    const ratio = (logPop - logMin) / (logMax - logMin);
+    const ratio = Math.min(1, Math.max(0, (logPop - logMin) / (logMax - logMin)));
 
-    // Map to pixel range (4 to 12)
     return 4 + ratio * 8;
+  }
+
+  // Redraw markers when zoom changes
+  function redrawMarkers(cities) {
+    clearSelectedMarker();
+    cityMarkers.forEach(m => map.removeLayer(m));
+    cityMarkers = [];
+
+    cities.forEach(city => {
+      const markerColor = getMarkerColor(city.population);
+      const markerRadius = getMarkerRadius(city.population);
+      const distStr = formatDistance(city.lat, currentLat);
+      const tempStr = formatTemps(estimateTemps(city.lat));
+
+      const marker = L.circleMarker([city.lat, city.lng], {
+        radius: markerRadius,
+        fillColor: markerColor,
+        fillOpacity: 0.9,
+        stroke: false
+      }).addTo(map);
+
+      marker.bindTooltip(
+        `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempStr}`,
+        { permanent: false, direction: 'top', className: 'city-tooltip' }
+      );
+
+      marker._origColor = markerColor;
+      marker._cityData = city;
+      cityMarkers.push(marker);
+    });
   }
 
   function updateMapForLatitude(lat, lng, matchingCities) {
     clearMapLayers();
     drawLatitudeLine(lat);
 
-    matchingCities.forEach((city, index) => {
-      const { name, country, lat: cLat, lng: cLng, population } = city;
-      const distStr = formatDistance(cLat, currentLat);
-      const temps = estimateTemps(cLat);
-      const tempStr = formatTemps(temps);
-      const markerColor = getMarkerColor(population);
-      const markerRadius = getMarkerRadius(population);
+    matchingCities.forEach(city => {
+      const distStr = formatDistance(city.lat, currentLat);
+      const tempStr = formatTemps(estimateTemps(city.lat));
+      const markerColor = getMarkerColor(city.population);
+      const markerRadius = getMarkerRadius(city.population);
 
-      setTimeout(() => {
-        const marker = L.circleMarker([cLat, cLng], {
-          radius: markerRadius,
-          fillColor: markerColor,
-          fillOpacity: 0.9,
-          stroke: false
-        }).addTo(map);
+      const marker = L.circleMarker([city.lat, city.lng], {
+        radius: markerRadius,
+        fillColor: markerColor,
+        fillOpacity: 0.9,
+        stroke: false
+      }).addTo(map);
 
-        marker.bindTooltip(`<strong>${name}</strong><br>${formatPopulation(population)} pop · ${distStr}<br>${tempStr}`, {
-          permanent: false,
-          direction: 'top',
-          className: 'city-tooltip'
-        });
+      marker.bindTooltip(
+        `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempStr}`,
+        { permanent: false, direction: 'top', className: 'city-tooltip' }
+      );
 
-        // Store original color for proximity highlighting
-        marker._origColor = markerColor;
-        marker._origRadius = markerRadius;
-        marker._cityData = city;
-
-        cityMarkers.push(marker);
-      }, index * 10);
+      marker._origColor = markerColor;
+      marker._cityData = city;
+      cityMarkers.push(marker);
     });
 
-    // Center on clicked point, don't change zoom
     map.setView([lat, lng], map.getZoom(), { animate: true, duration: 0.3 });
   }
 
@@ -575,56 +639,43 @@
     clearMapLayers();
     drawLatitudeLine(lat);
 
-    const { name, country, lat: sLat, lng: sLng, population } = selectedCity;
-    const temps = estimateTemps(sLat);
-    const tempStr = formatTemps(temps);
+    const tempStr = formatTemps(estimateTemps(selectedCity.lat));
 
-    // Selected city marker (larger, orange)
-    selectedMarker = L.circleMarker([sLat, sLng], {
-      radius: getMarkerRadius(population) + 4,
+    selectedMarker = L.circleMarker([selectedCity.lat, selectedCity.lng], {
+      radius: getMarkerRadius(selectedCity.population) + 4,
       fillColor: '#fb923c',
       fillOpacity: 1,
       stroke: false
     }).addTo(map);
 
-    selectedMarker.bindTooltip(`<strong>${name}</strong><br>${formatPopulation(population)} pop<br>${tempStr}`, {
-      permanent: false,
-      direction: 'top',
-      className: 'city-tooltip'
+    selectedMarker.bindTooltip(
+      `<strong>${selectedCity.name}</strong><br>${formatPopulation(selectedCity.population)} pop<br>${tempStr}`,
+      { permanent: false, direction: 'top', className: 'city-tooltip' }
+    );
+
+    matchingCities.forEach(city => {
+      const distStr = formatDistance(city.lat, currentLat);
+      const cTempStr = formatTemps(estimateTemps(city.lat));
+      const markerColor = getMarkerColor(city.population);
+      const markerRadius = getMarkerRadius(city.population);
+
+      const marker = L.circleMarker([city.lat, city.lng], {
+        radius: markerRadius,
+        fillColor: markerColor,
+        fillOpacity: 0.9,
+        stroke: false
+      }).addTo(map);
+
+      marker.bindTooltip(
+        `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${cTempStr}`,
+        { permanent: false, direction: 'top', className: 'city-tooltip' }
+      );
+
+      marker._origColor = markerColor;
+      marker._cityData = city;
+      cityMarkers.push(marker);
     });
 
-    matchingCities.forEach((city, index) => {
-      const { name: cName, country: cCountry, lat: cLat, lng: cLng, population: cPop } = city;
-      const distStr = formatDistance(cLat, currentLat);
-      const cTemps = estimateTemps(cLat);
-      const cTempStr = formatTemps(cTemps);
-      const markerColor = getMarkerColor(cPop);
-      const markerRadius = getMarkerRadius(cPop);
-
-      setTimeout(() => {
-        const marker = L.circleMarker([cLat, cLng], {
-          radius: markerRadius,
-          fillColor: markerColor,
-          fillOpacity: 0.9,
-          stroke: false
-        }).addTo(map);
-
-        marker.bindTooltip(`<strong>${cName}</strong><br>${formatPopulation(cPop)} pop · ${distStr}<br>${cTempStr}`, {
-          permanent: false,
-          direction: 'top',
-          className: 'city-tooltip'
-        });
-
-        // Store original color for proximity highlighting
-        marker._origColor = markerColor;
-        marker._origRadius = markerRadius;
-        marker._cityData = city;
-
-        cityMarkers.push(marker);
-      }, index * 10);
-    });
-
-    // Center on selected city at reasonable zoom
     const targetZoom = Math.min(Math.max(map.getZoom(), 3), MAX_ZOOM);
     map.flyTo([lat, lng], targetZoom, { duration: 0.6 });
   }
@@ -654,11 +705,22 @@
     }
     cityMarkers.forEach(m => map.removeLayer(m));
     cityMarkers = [];
+    selectedCityMarker = null;
   }
 
   function formatLat(lat) {
     const dir = lat >= 0 ? 'N' : 'S';
     return Math.abs(lat).toFixed(2) + '°' + dir;
+  }
+
+  function formatPopulation(pop) {
+    if (pop >= 1000000) {
+      return (pop / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    }
+    if (pop >= 1000) {
+      return Math.round(pop / 1000) + 'k';
+    }
+    return pop.toString();
   }
 
   function formatDistance(cityLat, refLat) {
@@ -675,31 +737,31 @@
     return Math.round(km) + 'km ' + dir;
   }
 
-  // Estimate temperatures based on latitude
   function estimateTemps(lat) {
     const absLat = Math.abs(lat);
 
-    let minC, maxC;
+    const bands = [
+      [0, 22, 31],
+      [10, 20, 32],
+      [20, 15, 33],
+      [30, 8, 30],
+      [40, 2, 25],
+      [50, -2, 20],
+      [60, -8, 15],
+      [70, -15, 10],
+      [90, -30, 5]
+    ];
 
-    if (absLat < 10) {
-      minC = 22; maxC = 31;
-    } else if (absLat < 20) {
-      minC = 18; maxC = 33;
-    } else if (absLat < 30) {
-      minC = 10; maxC = 34;
-    } else if (absLat < 40) {
-      minC = 4; maxC = 28;
-    } else if (absLat < 50) {
-      minC = 0; maxC = 23;
-    } else if (absLat < 60) {
-      minC = -3; maxC = 19;
-    } else if (absLat < 70) {
-      minC = -12; maxC = 15;
-    } else {
-      minC = -25; maxC = 8;
+    for (let i = 0; i < bands.length - 1; i++) {
+      if (absLat >= bands[i][0] && absLat < bands[i + 1][0]) {
+        const t = (absLat - bands[i][0]) / (bands[i + 1][0] - bands[i][0]);
+        const minC = Math.round(bands[i][1] + t * (bands[i + 1][1] - bands[i][1]));
+        const maxC = Math.round(bands[i][2] + t * (bands[i + 1][2] - bands[i][2]));
+        return { minC, maxC };
+      }
     }
 
-    return { minC, maxC };
+    return { minC: -30, maxC: 5 };
   }
 
   function formatTemps(temps) {
@@ -718,7 +780,6 @@
     return `<span class="cold">${min}${unit}</span> / <span class="hot">${max}${unit}</span>`;
   }
 
-  // Init
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
