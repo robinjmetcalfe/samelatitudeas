@@ -222,7 +222,7 @@
     SECTIONS.forEach(sec => {
       const charts = CHARTS.filter(c => c.section === sec.id);
       if (!charts.length) return;
-      html += `<div class="compare-section"><div class="section-head"><h3>${sec.title}</h3>` +
+      html += `<div class="compare-section" data-section="${sec.id}"><div class="section-head"><h3>${sec.title}</h3>` +
         (sec.sub ? `<span class="section-sub">${sec.sub}</span>` : '') + '</div>';
       charts.forEach(c => { html += chartBlock(c); });
       html += '</div>';
@@ -340,24 +340,104 @@
     return out;
   }
 
+  const MONTHFULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
   function redrawCharts() {
-    const anyData = dataCache.size > 0;
+    const loadingDone = selected.every(c => dataCache.has(key(c)));
     CHARTS.forEach(chart => {
-      const block = modal.querySelector(`.chart-block[data-chart="${chart.id}"] .chart-area`);
-      if (!block) return;
+      const blockEl = modal.querySelector(`.chart-block[data-chart="${chart.id}"]`);
+      if (!blockEl) return;
+      const area = blockEl.querySelector('.chart-area');
       const ds = datasetsFor(chart);
       if (ds.length === 0) {
-        block.innerHTML = (anyData || chart.kind === 'daylight')
-          ? '<div class="chart-empty">No data</div>'
-          : '<div class="chart-loading">Loading…</div>';
+        if (loadingDone || chart.kind === 'daylight') {
+          blockEl.style.display = 'none';      // hide charts with no data
+        } else {
+          blockEl.style.display = '';
+          area.innerHTML = '<div class="chart-loading">Loading…</div>';
+        }
         return;
       }
-      block.innerHTML = svgLineChart(ds, {
-        smooth: chart.smooth,
-        markers: chart.markers,
-        integerY: chart.integerY,
-        xMonths: chart.xMonths
+      blockEl.style.display = '';
+      const { svg, geom } = svgLineChart(ds, {
+        smooth: chart.smooth, markers: chart.markers,
+        integerY: chart.integerY, xMonths: chart.xMonths
       });
+      area.innerHTML = buildChartLegend(ds) +
+        '<div class="chart-plot">' + svg +
+        '<div class="chart-guide"></div><div class="chart-cursor"></div></div>';
+      attachHover(area.querySelector('.chart-plot'), chart, ds, geom);
+    });
+    // Hide section headers whose charts are all hidden
+    SECTIONS.forEach(sec => {
+      const secEl = modal.querySelector(`.compare-section[data-section="${sec.id}"]`);
+      if (!secEl) return;
+      const visible = [...secEl.querySelectorAll('.chart-block')].some(b => b.style.display !== 'none');
+      secEl.style.display = visible ? '' : 'none';
+    });
+  }
+
+  function buildChartLegend(datasets) {
+    return '<div class="chart-legend">' + datasets.map(d =>
+      `<span class="cl-item"><span class="cl-dot" style="background:${d.color}"></span>${escapeHtml(d.label)}</span>`
+    ).join('') + '</div>';
+  }
+
+  function nearestPoint(points, x) {
+    let best = null, bd = Infinity;
+    for (const p of points) { const dd = Math.abs(p.x - x); if (dd < bd) { bd = dd; best = p; } }
+    return best;
+  }
+
+  function formatVal(chart, y) {
+    if (chart.id === 'pop') return fmtPop(y);
+    if (chart.conv === 'temp') return Math.round(y) + tLabel();
+    const u = typeof chart.unit === 'function' ? chart.unit() : chart.unit;
+    const v = chart.integerY ? Math.round(y) : Math.round(y * 10) / 10;
+    return v + (u ? ' ' + u : '');
+  }
+
+  // Hover: vertical guide + tooltip listing each city's value at that x.
+  function attachHover(plotEl, chart, datasets, geom) {
+    const svg = plotEl.querySelector('svg');
+    const guide = plotEl.querySelector('.chart-guide');
+    const cursor = plotEl.querySelector('.chart-cursor');
+    const xsSet = new Set();
+    datasets.forEach(d => d.points.forEach(p => xsSet.add(p.x)));
+    const xs = [...xsSet].sort((a, b) => a - b);
+    if (!xs.length) return;
+
+    plotEl.addEventListener('mousemove', function (e) {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const vbX = (e.clientX - rect.left) / rect.width * geom.W;
+      const frac = (vbX - geom.padL) / (geom.W - geom.padL - geom.padR);
+      const dataX = geom.xMin + frac * (geom.xMax - geom.xMin);
+      let nx = xs[0];
+      for (const x of xs) if (Math.abs(x - dataX) < Math.abs(nx - dataX)) nx = x;
+      const pxView = geom.padL + (nx - geom.xMin) / (geom.xMax - geom.xMin) * (geom.W - geom.padL - geom.padR);
+      const leftCss = pxView / geom.W * rect.width;
+      guide.style.left = leftCss + 'px';
+      guide.style.display = 'block';
+
+      const rows = datasets.map(d => {
+        const pt = d.points.find(p => p.x === nx) || nearestPoint(d.points, nx);
+        return pt ? { color: d.color, label: d.label, val: pt.y } : null;
+      }).filter(Boolean).sort((a, b) => b.val - a.val);
+      const header = (chart.xMonths) ? MONTHFULL[nx - 1] : nx;
+      cursor.innerHTML = `<div class="cur-head">${header}</div>` + rows.map(r =>
+        `<div class="cur-row"><span class="cur-dot" style="background:${r.color}"></span>` +
+        `<span class="cur-name">${escapeHtml(r.label)}</span>` +
+        `<span class="cur-val">${formatVal(chart, r.val)}</span></div>`).join('');
+      cursor.style.display = 'block';
+      const cw = cursor.offsetWidth;
+      let cx = leftCss + 12;
+      if (cx + cw > rect.width) cx = leftCss - cw - 12;
+      cursor.style.left = Math.max(0, cx) + 'px';
+    });
+    plotEl.addEventListener('mouseleave', function () {
+      guide.style.display = 'none';
+      cursor.style.display = 'none';
     });
   }
 
@@ -413,8 +493,9 @@
         `stroke-linejoin="round" stroke-linecap="round" opacity="0.92"/>${dots}`;
     }).join('');
 
-    return `<svg viewBox="0 0 ${W} ${H}" class="line-chart" preserveAspectRatio="none">` +
+    const svg = `<svg viewBox="0 0 ${W} ${H}" class="line-chart" preserveAspectRatio="none">` +
       grid + lines + xlab + `</svg>`;
+    return { svg, geom: { W, H, padL, padR, padT, padB, xMin, xMax, yMin, yMax } };
   }
 
   // Catmull-Rom -> cubic Bezier smoothing for a series of [x,y] points.
