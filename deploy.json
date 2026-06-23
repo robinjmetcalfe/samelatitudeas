@@ -1,0 +1,7 @@
+{
+  "live": true,
+  "project": "samelatitudeas",
+  "type": "custom",
+  "deploy_path": "/srv/solarise/projects/samelatitudeas/current",
+  "shared_path": "/srv/solarise/projects/samelatitudeas/shared"
+}
