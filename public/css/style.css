@@ -1356,3 +1356,12 @@ body {
 }
 .sum-remove:hover { color: var(--hot); background: var(--bg-hover); }
 .climate-cell { color: var(--text); }
+
+/* Country in chart hover tooltip */
+.cur-country {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+/* Compare markers on the map */
+.compare-marker-tip strong { font-weight: 600; }

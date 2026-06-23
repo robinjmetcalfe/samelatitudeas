@@ -207,6 +207,9 @@
           marker._origColor = newColor;
         });
       });
+
+      // Update compare-marker ring colour for the new theme
+      renderCompareMarkers();
     });
   }
 
@@ -571,6 +574,7 @@
       updateCitiesList(getVisibleCities());
       redrawMarkers(filtered);
     }
+    renderCompareMarkers();
   }
 
   // On pan, update sidebar to show visible cities
@@ -584,6 +588,34 @@
         updateCitiesList(getVisibleCities());
       }
     }
+    renderCompareMarkers();
+  }
+
+  // Markers for the cities currently in the comparison list (shown on the map,
+  // independent of the selected latitude band), coloured to match the modal.
+  let compareMarkers = [];
+  function renderCompareMarkers() {
+    if (!map || !window.CityCompare) return;
+    compareMarkers.forEach(m => map.removeLayer(m));
+    compareMarkers = [];
+    const list = CityCompare.list();
+    if (!list.length) return;
+    const offsets = getNeededOffsets();
+    const stroke = theme === 'light' ? '#171717' : '#ffffff';
+    list.forEach(city => {
+      offsets.forEach(offset => {
+        const marker = L.circleMarker([city.lat, city.lng + offset], {
+          radius: 7, color: stroke, weight: 2, fillColor: city.color,
+          fillOpacity: 1, interactive: true, pane: 'markerPane'
+        }).addTo(map);
+        marker.bindTooltip(
+          `<strong>${city.name}</strong> <span style="color:var(--text-muted)">${city.country}</span>` +
+          `<br><span style="opacity:.7">In comparison</span>`,
+          { direction: 'top', className: 'city-tooltip' }
+        );
+        compareMarkers.push(marker);
+      });
+    });
   }
 
   function handleProximityHighlight(e) {
@@ -1265,7 +1297,9 @@
       }
       if (mobileCities.length) updateMobileCityCard();
       updateReferenceCompareBtn();
+      renderCompareMarkers();
     });
+    renderCompareMarkers(); // initial (restores markers for a persisted list)
   }
 
   function getMarkerColor(pop) {

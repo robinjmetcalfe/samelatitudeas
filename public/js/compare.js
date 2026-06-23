@@ -97,24 +97,23 @@
 
   // ---- Daylight from latitude (zero-cost, on-theme) ----
   // Longest day length (hours) at summer solstice for a given latitude.
-  function longestDay(lat) {
-    const decl = 23.44 * Math.PI / 180; // solstice declination
-    const phi = Math.abs(lat) * Math.PI / 180;
-    const x = -Math.tan(phi) * Math.tan(decl);
-    if (x <= -1) return 24;
-    if (x >= 1) return 0;
-    const ha = Math.acos(x);
-    return (2 * ha * 180 / Math.PI) / 15;
+  // Day length (hours) using the standard sunrise/sunset altitude of -0.833°
+  // (atmospheric refraction 34' + solar semidiameter 16') so it matches
+  // published "hours of daylight", not just the geometric center-of-sun value.
+  const SUN_ALT = Math.sin(-0.833 * Math.PI / 180);
+  function dayLengthHours(latDeg, declDeg) {
+    const phi = latDeg * Math.PI / 180, decl = declDeg * Math.PI / 180;
+    const cosH = (SUN_ALT - Math.sin(phi) * Math.sin(decl)) / (Math.cos(phi) * Math.cos(decl));
+    if (cosH <= -1) return 24;
+    if (cosH >= 1) return 0;
+    return 2 * Math.acos(cosH) * 180 / Math.PI / 15;
   }
+  function longestDay(lat) { return dayLengthHours(Math.abs(lat), 23.44); } // summer solstice
   // Day length (hours) for a latitude at the middle of a given month (1-12).
   const MID_DOY = [15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349];
   function dayLengthMonth(lat, m) {
-    const doy = MID_DOY[m - 1];
-    const decl = 23.44 * Math.PI / 180 * Math.sin(2 * Math.PI / 365 * (doy - 81));
-    const phi = lat * Math.PI / 180;
-    let x = -Math.tan(phi) * Math.tan(decl);
-    x = Math.max(-1, Math.min(1, x));
-    return (2 * Math.acos(x) * 180 / Math.PI) / 15;
+    const decl = 23.44 * Math.sin(2 * Math.PI / 365 * (MID_DOY[m - 1] - 81));
+    return dayLengthHours(lat, decl);
   }
   // Chart definitions, grouped into sections.
   const CHARTS = [
@@ -273,19 +272,21 @@
   function climateShort(code, full) { return CLIMATE_SHORT[code] || full || code; }
 
   async function loadAllData() {
-    let done = 0;
-    const total = selected.length;
     await Promise.all(selected.map(async c => {
       const k = key(c);
-      if (!dataCache.has(k)) {
-        const [climate, population] = await Promise.all([
-          fetchJSON(`climate.php?action=climate&lat=${c.lat}&lng=${c.lng}`),
-          fetchJSON(`climate.php?action=population&lat=${c.lat}&lng=${c.lng}`)
-        ]);
+      const cached = dataCache.get(k);
+      // (Re)fetch if never cached, or if a previous attempt failed (climate null).
+      if (!cached || cached.climate == null) {
+        let climate = await fetchJSON(`climate.php?action=climate&lat=${c.lat}&lng=${c.lng}`);
+        if (climate == null) {                       // one retry after a short pause
+          await new Promise(r => setTimeout(r, 1200));
+          climate = await fetchJSON(`climate.php?action=climate&lat=${c.lat}&lng=${c.lng}`);
+        }
+        const population = (cached && cached.population)
+          ? cached.population
+          : await fetchJSON(`climate.php?action=population&lat=${c.lat}&lng=${c.lng}`);
         dataCache.set(k, { climate, population });
       }
-      done++;
-      // Progressive: update as each city resolves.
       if (!modal.classList.contains('hidden')) { renderSummary(); redrawCharts(); }
     }));
     if (!modal.classList.contains('hidden')) { renderSummary(); redrawCharts(); }
@@ -304,18 +305,19 @@
     const out = [];
     selected.forEach(c => {
       const d = dataCache.get(key(c));
+      const meta = { color: c._color, label: c.name, country: c.country };
       // Daylight is pure geometry — always available from latitude.
       if (chart.kind === 'daylight') {
         const pts = [];
         for (let m = 1; m <= 12; m++) pts.push({ x: m, y: dayLengthMonth(c.lat, m) });
-        out.push({ color: c._color, label: c.name, points: pts });
+        out.push({ ...meta, points: pts });
         return;
       }
       if (!d) return;
       if (chart.kind === 'pop') {
         const p = d.population;
         if (!p || !p.points || !p.points.length) return;
-        out.push({ color: c._color, label: c.name, points: p.points.map(pt => ({ x: pt.year, y: pt.value })) });
+        out.push({ ...meta, points: p.points.map(pt => ({ x: pt.year, y: pt.value })) });
         return;
       }
       const clim = d.climate;
@@ -324,7 +326,7 @@
         const pts = clim.monthly.map(r => ({
           x: r.m, y: chart.conv === 'temp' ? toUnit(r[chart.field]) : r[chart.field]
         })).filter(p => p.y != null);
-        if (pts.length) out.push({ color: c._color, label: c.name, points: pts });
+        if (pts.length) out.push({ ...meta, points: pts });
         return;
       }
       // kind === 'year'
@@ -332,7 +334,7 @@
       const pts = clim.series.map(r => ({
         x: r.year, y: chart.conv === 'temp' ? toUnit(r[chart.field]) : r[chart.field]
       })).filter(p => p.y != null);
-      if (pts.length) out.push({ color: c._color, label: c.name, points: pts });
+      if (pts.length) out.push({ ...meta, points: pts });
     });
     return out;
   }
@@ -419,13 +421,14 @@
 
       const rows = datasets.map(d => {
         const pt = d.points.find(p => p.x === nx) || nearestPoint(d.points, nx);
-        return pt ? { color: d.color, label: d.label, val: pt.y } : null;
+        return pt ? { color: d.color, label: d.label, country: d.country, val: pt.y } : null;
       }).filter(Boolean).sort((a, b) => b.val - a.val);
       const header = (chart.xMonths) ? MONTHFULL[nx - 1] : nx;
       cursor.innerHTML = `<div class="cur-head">${header}</div>` + rows.map(r =>
         `<div class="cur-row"><span class="cur-dot" style="background:${r.color}"></span>` +
-        `<span class="cur-name">${escapeHtml(r.label)}</span>` +
-        `<span class="cur-val">${formatVal(chart, r.val)}</span></div>`).join('');
+        `<span class="cur-name">${escapeHtml(r.label)}` +
+        (r.country ? `<span class="cur-country">${escapeHtml(r.country)}</span>` : '') +
+        `</span><span class="cur-val">${formatVal(chart, r.val)}</span></div>`).join('');
       cursor.style.display = 'block';
       const cw = cursor.offsetWidth;
       let cx = leftCss + 12;
@@ -554,6 +557,8 @@
 
   window.CityCompare = {
     key, has, toggle, isFull, clear, onChange, open: openModal,
-    count: () => selected.length
+    count: () => selected.length,
+    // Shallow copies (incl. _color) for rendering compare markers on the map.
+    list: () => selected.map(c => ({ name: c.name, country: c.country, lat: c.lat, lng: c.lng, color: c._color }))
   };
 })();
