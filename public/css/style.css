@@ -1365,3 +1365,33 @@ body {
 }
 /* Compare markers on the map */
 .compare-marker-tip strong { font-weight: 600; }
+
+/* Comparison loading / failure status banner */
+.compare-status {
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+.compare-status.loading {
+  background: var(--bg-offscreen);
+  color: var(--text-muted);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.compare-status.warn {
+  background: var(--accent-dim);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-reload {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}

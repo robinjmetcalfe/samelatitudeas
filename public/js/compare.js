@@ -195,7 +195,8 @@
 
   function renderModal() {
     const body = modal.querySelector('.compare-body');
-    let html = '<div class="compare-summary-wrap"><table class="compare-summary"></table></div>';
+    let html = '<div class="compare-status" style="display:none"></div>' +
+      '<div class="compare-summary-wrap"><table class="compare-summary"></table></div>';
     SECTIONS.forEach(sec => {
       const charts = CHARTS.filter(c => c.section === sec.id);
       if (!charts.length) return;
@@ -209,8 +210,34 @@
       'otherwise estimated from satellite irradiance (marked ~). ' +
       'Population: GHS-UCDB urban-centre estimates (JRC, 1975–2015) where a centre is within 35 km, else Wikidata.</p>';
     body.innerHTML = html;
+    renderStatus();
     renderSummary();
     redrawCharts();
+  }
+
+  // Visible loading / failure banner so data problems are never silent.
+  function renderStatus() {
+    const el = modal.querySelector('.compare-status');
+    if (!el) return;
+    const loading = selected.filter(c => !dataCache.has(key(c)));
+    const failed = selected.filter(c => { const d = dataCache.get(key(c)); return d && d.climate == null; });
+    if (loading.length) {
+      el.style.display = '';
+      el.className = 'compare-status loading';
+      el.textContent = `Loading climate data… ${selected.length - loading.length}/${selected.length}`;
+    } else if (failed.length) {
+      el.style.display = '';
+      el.className = 'compare-status warn';
+      el.innerHTML = `⚠ Couldn’t load climate data for ${failed.map(c => escapeHtml(c.name)).join(', ')}. ` +
+        `<button class="status-reload">Reload</button>`;
+      el.querySelector('.status-reload').addEventListener('click', () => {
+        failed.forEach(c => dataCache.delete(key(c)));
+        renderStatus();
+        loadAllData();
+      });
+    } else {
+      el.style.display = 'none';
+    }
   }
 
   function chartBlock(c) {
@@ -287,7 +314,7 @@
           : await fetchJSON(`climate.php?action=population&lat=${c.lat}&lng=${c.lng}`);
         dataCache.set(k, { climate, population });
       }
-      if (!modal.classList.contains('hidden')) { renderSummary(); redrawCharts(); }
+      if (!modal.classList.contains('hidden')) { renderStatus(); renderSummary(); redrawCharts(); }
     }));
     if (!modal.classList.contains('hidden')) { renderSummary(); redrawCharts(); }
   }
