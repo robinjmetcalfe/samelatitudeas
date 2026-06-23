@@ -1339,3 +1339,5 @@ body {
   font-family: 'IBM Plex Mono', monospace;
   color: var(--text);
 }
+
+.compare-summary .sun-est { color: var(--text-muted); cursor: help; }

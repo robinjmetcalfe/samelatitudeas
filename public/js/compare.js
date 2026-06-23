@@ -127,7 +127,7 @@
   const CHARTS = [
     { id: 'mtemp',  title: 'Mean temperature by month', unit: tLabel, section: 'normals', kind: 'month', field: 'tmean', conv: 'temp', smooth: true, xMonths: true },
     { id: 'mprecip',title: 'Precipitation by month',    unit: 'mm',   section: 'normals', kind: 'month', field: 'precip', smooth: true, xMonths: true, integerY: true },
-    { id: 'msun',   title: 'Sunshine hours by month (est.)', unit: 'h', section: 'normals', kind: 'month', field: 'sun', smooth: true, xMonths: true, integerY: true },
+    { id: 'msun',   title: 'Sunshine hours by month', unit: 'h', section: 'normals', kind: 'month', field: 'sun', smooth: true, xMonths: true, integerY: true },
     { id: 'daylight',title:'Daylight hours by month',   unit: 'h',    section: 'normals', kind: 'daylight', smooth: true, xMonths: true },
     { id: 'high',   title: 'Average daily high',        unit: tLabel, section: 'trends', kind: 'year', field: 'tmax', conv: 'temp', smooth: true },
     { id: 'low',    title: 'Average daily low',         unit: tLabel, section: 'trends', kind: 'year', field: 'tmin', conv: 'temp', smooth: true },
@@ -227,9 +227,10 @@
       charts.forEach(c => { html += chartBlock(c); });
       html += '</div>';
     });
-    html += '<p class="compare-note">Climate: NASA POWER (monthly, 1981–present); sunshine hours estimated ' +
-      'from clear-sky irradiance. Köppen derived from monthly normals. ' +
-      'Population: Wikidata — recent and sparse for smaller places; deep per-city history isn’t reliably available.</p>';
+    html += '<p class="compare-note">Climate: NASA POWER (monthly, 1981–present); Köppen derived from monthly normals. ' +
+      'Sunshine: measured from the nearest weather station (Meteostat normals) where one is within 300 km, ' +
+      'otherwise estimated from satellite irradiance (marked ~). ' +
+      'Population: Wikidata — recent and sparse for smaller places.</p>';
     body.innerHTML = html;
     renderSummary();
     redrawCharts();
@@ -259,7 +260,15 @@
         ? (st.warming_per_decade > 0 ? '+' : '') + st.warming_per_decade + ' ' + tLabelDelta() : '…';
       const seas = st && st.seasonality != null ? st.seasonality + tLabel() : '…';
       const cont = st && st.seasonality != null ? continentality(st.seasonality, c.lat) : null;
-      const sun = st && st.sunshine_annual != null ? fmtNum(st.sunshine_annual) + ' h' : '…';
+      let sun = '…';
+      if (st && st.sunshine_annual != null) {
+        const v = fmtNum(st.sunshine_annual) + ' h';
+        if (st.sunshine_source === 'measured') {
+          sun = `<span title="Measured — ${escapeAttr(st.sunshine_station || 'station')} (${st.sunshine_dist} km, ${st.sunshine_period || ''})">${v}</span>`;
+        } else {
+          sun = `<span class="sun-est" title="Estimated from satellite irradiance (no nearby station)">${v}~</span>`;
+        }
+      }
       const koppen = st && st.koppen
         ? `<span class="koppen-badge" title="${escapeAttr(st.koppen_name || '')}">${escapeHtml(st.koppen)}</span>` : '…';
       const pop = c.population ? fmtPop(c.population) : '—';

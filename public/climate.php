@@ -190,12 +190,127 @@ function slopePerYear($years, $values) {
     return ($n * $sxy - $sx * $sy) / $denom;
 }
 
+// ---- Meteostat: measured station sunshine duration -----------------------
+function fetchGz($url, $timeout = 30) {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_CONNECTTIMEOUT => 15, CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_USERAGENT => 'samelatitudeas/1.0 (https://samelatitudeas.solarise.dev)',
+    ]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($body === false || $code !== 200) return null;
+    $dec = @gzdecode($body);
+    return $dec !== false ? $dec : $body;
+}
+
+function haversineKm($la1, $lo1, $la2, $lo2) {
+    $R = 6371;
+    $dLa = deg2rad($la2 - $la1); $dLo = deg2rad($lo2 - $lo1);
+    $a = sin($dLa / 2) ** 2 + cos(deg2rad($la1)) * cos(deg2rad($la2)) * sin($dLo / 2) ** 2;
+    return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
+}
+
+// Populate the met_stations table from Meteostat's station list (once).
+function ensureMetStations() {
+    $db = cacheDb();
+    $db->exec('CREATE TABLE IF NOT EXISTS met_stations (id TEXT PRIMARY KEY, lat REAL, lng REAL, name TEXT)');
+    $count = (int)$db->querySingle('SELECT COUNT(*) FROM met_stations');
+    if ($count > 0) return true;
+    $raw = fetchGz('https://bulk.meteostat.net/v2/stations/lite.json.gz', 45);
+    if ($raw === null) return false;
+    $arr = json_decode($raw, true);
+    if (!is_array($arr)) return false;
+    $db->exec('BEGIN');
+    $stmt = $db->prepare('INSERT OR IGNORE INTO met_stations (id,lat,lng,name) VALUES (?,?,?,?)');
+    foreach ($arr as $s) {
+        $loc = $s['location'] ?? null;
+        if (!$loc || !isset($loc['latitude'], $loc['longitude'])) continue;
+        $norm = $s['inventory']['normals'] ?? null;   // only stations that have normals
+        if (!$norm || empty($norm['start'])) continue;
+        $name = is_array($s['name'] ?? null) ? ($s['name']['en'] ?? $s['id']) : ($s['name'] ?? $s['id']);
+        $stmt->bindValue(1, $s['id'], SQLITE3_TEXT);
+        $stmt->bindValue(2, (float)$loc['latitude'], SQLITE3_FLOAT);
+        $stmt->bindValue(3, (float)$loc['longitude'], SQLITE3_FLOAT);
+        $stmt->bindValue(4, $name, SQLITE3_TEXT);
+        $stmt->execute();
+        $stmt->reset();
+    }
+    $db->exec('COMMIT');
+    return true;
+}
+
+// Parse one station's bulk normals -> [period => [month => tsun_minutes|null]]
+function stationNormals($id) {
+    $cached = cacheGet("metnorm:$id", 60 * 60 * 24 * 120);
+    if ($cached !== null) { $d = json_decode($cached, true); return is_array($d) ? $d : null; }
+    $raw = fetchGz("https://bulk.meteostat.net/v2/normals/$id.csv.gz", 20);
+    $out = [];
+    if ($raw !== null) {
+        foreach (explode("\n", trim($raw)) as $line) {
+            $c = explode(',', $line);
+            if (count($c) < 9) continue;
+            $month = (int)$c[2];
+            if ($month < 1 || $month > 12) continue;
+            $tsun = $c[8];
+            $out[$c[0] . '-' . $c[1]][$month] = ($tsun === '' || $tsun === 'None') ? null : (float)$tsun;
+        }
+    }
+    cacheSet("metnorm:$id", json_encode($out));
+    return $out ?: null;
+}
+
+// Nearest station with measured sunshine normals; returns monthly hours + meta.
+function measuredSunshine($lat, $lng) {
+    if (!ensureMetStations()) return null;
+    $db = cacheDb();
+    $dLat = 3.0;
+    $dLng = 3.0 / max(0.2, cos(deg2rad($lat)));
+    $stmt = $db->prepare('SELECT id,lat,lng,name FROM met_stations WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?');
+    $stmt->bindValue(1, $lat - $dLat, SQLITE3_FLOAT); $stmt->bindValue(2, $lat + $dLat, SQLITE3_FLOAT);
+    $stmt->bindValue(3, $lng - $dLng, SQLITE3_FLOAT); $stmt->bindValue(4, $lng + $dLng, SQLITE3_FLOAT);
+    $res = $stmt->execute();
+    $cands = [];
+    while ($r = $res->fetchArray(SQLITE3_ASSOC)) {
+        $d = haversineKm($lat, $lng, $r['lat'], $r['lng']);
+        if ($d <= 300) { $r['dist'] = $d; $cands[] = $r; }
+    }
+    usort($cands, fn($a, $b) => $a['dist'] <=> $b['dist']);
+    $cands = array_slice($cands, 0, 15);
+    foreach ($cands as $c) {
+        $norm = stationNormals($c['id']);
+        if ($norm === null) continue;
+        $best = null; $bestPeriod = null;
+        foreach (['1991-2020', '1981-2010', '1971-2000', '1961-1990'] as $pk) {
+            if (isset($norm[$pk]) && count(array_filter($norm[$pk], fn($v) => $v !== null)) >= 10) {
+                $best = $norm[$pk]; $bestPeriod = $pk; break;
+            }
+        }
+        if ($best === null) continue;
+        $monthly = []; $annual = 0; $ok = 0;
+        for ($m = 1; $m <= 12; $m++) {
+            $v = $best[$m] ?? null;
+            if ($v === null) { $monthly[$m] = null; }
+            else { $h = $v / 60; $monthly[$m] = round($h); $annual += $h; $ok++; }
+        }
+        if ($ok < 10) continue;
+        return [
+            'monthly' => $monthly, 'annual' => round($annual),
+            'station' => $c['name'], 'dist' => round($c['dist']),
+            'period' => str_replace('-', '–', $bestPeriod),
+        ];
+    }
+    return null;
+}
+
 $action = $_GET['action'] ?? '';
 
 if ($action === 'climate') {
     $lat = round(floatval($_GET['lat'] ?? 0), 2);
     $lng = round(floatval($_GET['lng'] ?? 0), 2);
-    $key = "climate:v2:$lat:$lng";
+    $key = "climate:v3:$lat:$lng";
 
     $cached = cacheGet($key, 60 * 60 * 24 * 90); // 90-day TTL
     if ($cached !== null) { echo $cached; exit; }
@@ -316,6 +431,21 @@ if ($action === 'climate') {
         $monT[] = $tmean; $monP[] = $precipM;
     }
 
+    // Prefer MEASURED sunshine (nearest Meteostat station normals) over the estimate.
+    $sunSource = 'estimated';
+    $sunStation = null; $sunDist = null; $sunPeriod = null;
+    $meas = measuredSunshine($lat, $lng);
+    if ($meas !== null) {
+        $sunSource = 'measured';
+        $sunStation = $meas['station']; $sunDist = $meas['dist']; $sunPeriod = $meas['period'];
+        $annualSun = $meas['annual'];
+        foreach ($monthly as &$mm) {
+            $mv = $meas['monthly'][$mm['m']] ?? null;
+            if ($mv !== null) $mm['sun'] = $mv;
+        }
+        unset($mm);
+    }
+
     $yArr = array_column($series, 'year');
     $warming = slopePerYear($yArr, array_column($series, 'tmean'));
     $seasonality = count($seasonAmps) ? array_sum($seasonAmps) / count($seasonAmps) : null;
@@ -331,6 +461,10 @@ if ($action === 'climate') {
             'warming_per_decade' => $warming !== null ? round($warming * 10, 2) : null,
             'seasonality' => $seasonality !== null ? round($seasonality, 1) : null,
             'sunshine_annual' => $annualSun,
+            'sunshine_source' => $sunSource,
+            'sunshine_station' => $sunStation,
+            'sunshine_dist' => $sunDist,
+            'sunshine_period' => $sunPeriod,
             'koppen' => $kCode,
             'koppen_name' => $kName,
             'first_year' => min($yArr),
