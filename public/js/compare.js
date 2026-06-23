@@ -116,13 +116,6 @@
     x = Math.max(-1, Math.min(1, x));
     return (2 * Math.acos(x) * 180 / Math.PI) / 15;
   }
-  // Conrad's continentality index from annual temp range (seasonality) and latitude.
-  function continentality(seasonality, lat) {
-    if (seasonality == null) return null;
-    const c = 1.7 * seasonality / Math.sin((Math.abs(lat) + 10) * Math.PI / 180) - 14;
-    return Math.round(Math.max(0, Math.min(100, c)));
-  }
-
   // Chart definitions, grouped into sections.
   const CHARTS = [
     { id: 'mtemp',  title: 'Mean temperature by month', unit: tLabel, section: 'normals', kind: 'month', field: 'tmean', conv: 'temp', smooth: true, xMonths: true },
@@ -156,7 +149,6 @@
     '<div class="modal-content compare-content">' +
       '<button class="modal-close" aria-label="Close">&times;</button>' +
       '<h2>City comparison</h2>' +
-      '<div class="compare-legend"></div>' +
       '<div class="compare-body"></div>' +
     '</div>';
   document.body.appendChild(modal);
@@ -202,21 +194,7 @@
   }
   function closeModal() { modal.classList.add('hidden'); }
 
-  function renderLegend() {
-    const legend = modal.querySelector('.compare-legend');
-    legend.innerHTML = selected.map(c => {
-      const k = key(c);
-      return `<span class="legend-item" style="--c:${c._color}">` +
-        `<span class="legend-dot"></span>` +
-        `<span class="legend-name">${escapeHtml(c.name)}<span class="legend-country">${escapeHtml(c.country)}</span></span>` +
-        `<button class="legend-x" data-k="${escapeAttr(k)}" aria-label="Remove">&times;</button></span>`;
-    }).join('');
-    legend.querySelectorAll('.legend-x').forEach(b =>
-      b.addEventListener('click', () => removeKey(b.dataset.k)));
-  }
-
   function renderModal() {
-    renderLegend();
     const body = modal.querySelector('.compare-body');
     let html = '<div class="compare-summary-wrap"><table class="compare-summary"></table></div>';
     SECTIONS.forEach(sec => {
@@ -248,18 +226,14 @@
     const table = modal.querySelector('.compare-summary');
     if (!table) return;
     const rows = [];
-    rows.push('<tr class="sum-head"><th>City</th><th>Köppen</th><th>Lat</th><th>Elev</th>' +
-      `<th>Warming</th><th>Seasonality</th><th>Continent.</th><th>Sunshine</th><th>Longest day</th><th>Population</th></tr>`);
+    rows.push('<tr class="sum-head"><th></th><th>City</th><th>Climate</th><th>Lat</th>' +
+      `<th>Elev</th><th>Sunshine</th><th>Longest day</th><th>Population</th></tr>`);
     selected.forEach(c => {
       const k = key(c);
       const d = dataCache.get(k);
       const clim = d && d.climate;
       const st = clim && clim.stats;
-      const elev = clim && clim.elevation != null ? Math.round(clim.elevation) + ' m' : '—';
-      const warm = st && st.warming_per_decade != null
-        ? (st.warming_per_decade > 0 ? '+' : '') + st.warming_per_decade + ' ' + tLabelDelta() : '…';
-      const seas = st && st.seasonality != null ? st.seasonality + tLabel() : '…';
-      const cont = st && st.seasonality != null ? continentality(st.seasonality, c.lat) : null;
+      const elev = clim && clim.elevation != null ? Math.round(clim.elevation) + ' m' : '…';
       let sun = '…';
       if (st && st.sunshine_annual != null) {
         const v = fmtNum(st.sunshine_annual) + ' h';
@@ -269,20 +243,34 @@
           sun = `<span class="sun-est" title="Estimated from satellite irradiance (no nearby station)">${v}~</span>`;
         }
       }
-      const koppen = st && st.koppen
-        ? `<span class="koppen-badge" title="${escapeAttr(st.koppen_name || '')}">${escapeHtml(st.koppen)}</span>` : '…';
+      const climate = st && st.koppen
+        ? `<span class="climate-cell" title="${escapeAttr((st.koppen_name || '') + ' · Köppen ' + st.koppen)}">${escapeHtml(climateShort(st.koppen, st.koppen_name))}</span>` : '…';
       const pop = c.population ? fmtPop(c.population) : '—';
       rows.push(
-        `<tr><td><span class="sum-dot" style="background:${c._color}"></span>${escapeHtml(c.name)}` +
+        `<tr><td class="sum-rm-cell"><button class="sum-remove" data-k="${escapeAttr(k)}" aria-label="Remove ${escapeAttr(c.name)}">&times;</button></td>` +
+        `<td><span class="sum-dot" style="background:${c._color}"></span>${escapeHtml(c.name)}` +
         `<span class="sum-country">${escapeHtml(c.country)}</span></td>` +
-        `<td>${koppen}</td><td>${fmtLat(c.lat)}</td><td>${elev}</td>` +
-        `<td>${warm}</td><td>${seas}</td><td>${cont != null ? cont : '…'}</td>` +
+        `<td>${climate}</td><td>${fmtLat(c.lat)}</td><td>${elev}</td>` +
         `<td>${sun}</td><td>${longestDay(c.lat).toFixed(1)}h</td><td>${pop}</td></tr>`);
     });
     table.innerHTML = rows.join('');
+    table.querySelectorAll('.sum-remove').forEach(b =>
+      b.addEventListener('click', () => removeKey(b.dataset.k)));
   }
   function fmtNum(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
-  function tLabelDelta() { return tempUnit() === 'f' ? '°F/dec' : '°C/dec'; }
+  // Concise climate label per Köppen code (full name + code shown on hover).
+  const CLIMATE_SHORT = {
+    Af: 'Tropical', Am: 'Tropical', Aw: 'Tropical', As: 'Tropical',
+    BWh: 'Hot desert', BWk: 'Cold desert', BSh: 'Hot semi-arid', BSk: 'Cold semi-arid',
+    Cfa: 'Humid subtropical', Cfb: 'Oceanic', Cfc: 'Subpolar oceanic',
+    Cwa: 'Subtropical', Cwb: 'Subtropical highland', Cwc: 'Subtropical highland',
+    Csa: 'Mediterranean', Csb: 'Mediterranean', Csc: 'Mediterranean',
+    Dfa: 'Humid continental', Dfb: 'Humid continental', Dfc: 'Subarctic', Dfd: 'Subarctic',
+    Dwa: 'Humid continental', Dwb: 'Humid continental', Dwc: 'Subarctic', Dwd: 'Subarctic',
+    Dsa: 'Continental', Dsb: 'Continental', Dsc: 'Subarctic', Dsd: 'Subarctic',
+    ET: 'Tundra', EF: 'Ice cap',
+  };
+  function climateShort(code, full) { return CLIMATE_SHORT[code] || full || code; }
 
   async function loadAllData() {
     let done = 0;
