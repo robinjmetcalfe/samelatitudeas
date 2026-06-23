@@ -106,6 +106,43 @@
     const ha = Math.acos(x);
     return (2 * ha * 180 / Math.PI) / 15;
   }
+  // Day length (hours) for a latitude at the middle of a given month (1-12).
+  const MID_DOY = [15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349];
+  function dayLengthMonth(lat, m) {
+    const doy = MID_DOY[m - 1];
+    const decl = 23.44 * Math.PI / 180 * Math.sin(2 * Math.PI / 365 * (doy - 81));
+    const phi = lat * Math.PI / 180;
+    let x = -Math.tan(phi) * Math.tan(decl);
+    x = Math.max(-1, Math.min(1, x));
+    return (2 * Math.acos(x) * 180 / Math.PI) / 15;
+  }
+  // Conrad's continentality index from annual temp range (seasonality) and latitude.
+  function continentality(seasonality, lat) {
+    if (seasonality == null) return null;
+    const c = 1.7 * seasonality / Math.sin((Math.abs(lat) + 10) * Math.PI / 180) - 14;
+    return Math.round(Math.max(0, Math.min(100, c)));
+  }
+
+  // Chart definitions, grouped into sections.
+  const CHARTS = [
+    { id: 'mtemp',  title: 'Mean temperature by month', unit: tLabel, section: 'normals', kind: 'month', field: 'tmean', conv: 'temp', smooth: true, xMonths: true },
+    { id: 'mprecip',title: 'Precipitation by month',    unit: 'mm',   section: 'normals', kind: 'month', field: 'precip', smooth: true, xMonths: true, integerY: true },
+    { id: 'msun',   title: 'Sunshine hours by month (est.)', unit: 'h', section: 'normals', kind: 'month', field: 'sun', smooth: true, xMonths: true, integerY: true },
+    { id: 'daylight',title:'Daylight hours by month',   unit: 'h',    section: 'normals', kind: 'daylight', smooth: true, xMonths: true },
+    { id: 'high',   title: 'Average daily high',        unit: tLabel, section: 'trends', kind: 'year', field: 'tmax', conv: 'temp', smooth: true },
+    { id: 'low',    title: 'Average daily low',         unit: tLabel, section: 'trends', kind: 'year', field: 'tmin', conv: 'temp', smooth: true },
+    { id: 'mean',   title: 'Annual mean temperature',   unit: tLabel, section: 'trends', kind: 'year', field: 'tmean', conv: 'temp', smooth: true },
+    { id: 'precip', title: 'Annual precipitation',      unit: 'mm',   section: 'trends', kind: 'year', field: 'precip', integerY: true },
+    { id: 'solar',  title: 'Solar irradiance',          unit: 'kWh/m²/day', section: 'trends', kind: 'year', field: 'solar' },
+    { id: 'wind',   title: 'Wind speed',                unit: 'm/s',  section: 'trends', kind: 'year', field: 'wind' },
+    { id: 'humidity',title:'Relative humidity',         unit: '%',    section: 'trends', kind: 'year', field: 'humidity', integerY: true },
+    { id: 'pop',    title: 'Population',                unit: '',     section: 'pop', kind: 'pop', markers: true, integerY: true },
+  ];
+  const SECTIONS = [
+    { id: 'normals', title: 'The shape of the year', sub: 'Monthly climate normals (averaged across all years)' },
+    { id: 'trends', title: 'How it’s changing', sub: 'Year-by-year since 1981' },
+    { id: 'pop', title: 'Population', sub: '' },
+  ];
 
   // ============================ DOM ============================
   const tray = document.createElement('div');
@@ -181,23 +218,27 @@
   function renderModal() {
     renderLegend();
     const body = modal.querySelector('.compare-body');
-    // Build skeleton; charts fill in as data arrives.
-    body.innerHTML =
-      '<div class="compare-summary-wrap"><table class="compare-summary"></table></div>' +
-      chartBlock('high', 'Average daily high', tLabel()) +
-      chartBlock('low', 'Average daily low', tLabel()) +
-      chartBlock('mean', 'Annual mean temperature', tLabel()) +
-      chartBlock('precip', 'Annual precipitation', 'mm') +
-      chartBlock('pop', 'Population', '') +
-      '<p class="compare-note">Climate: NASA POWER (monthly, 1981–present). ' +
-      'Population: Wikidata — recent and sparse for smaller places; deep history isn’t reliably available per-city.</p>';
+    let html = '<div class="compare-summary-wrap"><table class="compare-summary"></table></div>';
+    SECTIONS.forEach(sec => {
+      const charts = CHARTS.filter(c => c.section === sec.id);
+      if (!charts.length) return;
+      html += `<div class="compare-section"><div class="section-head"><h3>${sec.title}</h3>` +
+        (sec.sub ? `<span class="section-sub">${sec.sub}</span>` : '') + '</div>';
+      charts.forEach(c => { html += chartBlock(c); });
+      html += '</div>';
+    });
+    html += '<p class="compare-note">Climate: NASA POWER (monthly, 1981–present); sunshine hours estimated ' +
+      'from clear-sky irradiance. Köppen derived from monthly normals. ' +
+      'Population: Wikidata — recent and sparse for smaller places; deep per-city history isn’t reliably available.</p>';
+    body.innerHTML = html;
     renderSummary();
     redrawCharts();
   }
 
-  function chartBlock(id, title, unit) {
-    return `<div class="chart-block" data-chart="${id}">` +
-      `<div class="chart-head"><span class="chart-title">${title}</span>` +
+  function chartBlock(c) {
+    const unit = typeof c.unit === 'function' ? c.unit() : c.unit;
+    return `<div class="chart-block" data-chart="${c.id}">` +
+      `<div class="chart-head"><span class="chart-title">${c.title}</span>` +
       `<span class="chart-unit">${unit}</span></div>` +
       `<div class="chart-area"><div class="chart-loading">Loading…</div></div></div>`;
   }
@@ -206,29 +247,32 @@
     const table = modal.querySelector('.compare-summary');
     if (!table) return;
     const rows = [];
-    rows.push('<tr class="sum-head"><th>City</th><th>Lat</th><th>Elev</th>' +
-      `<th>Now low/high</th><th>Warming</th><th>Seasonality</th><th>Longest day</th><th>Population</th></tr>`);
+    rows.push('<tr class="sum-head"><th>City</th><th>Köppen</th><th>Lat</th><th>Elev</th>' +
+      `<th>Warming</th><th>Seasonality</th><th>Continent.</th><th>Sunshine</th><th>Longest day</th><th>Population</th></tr>`);
     selected.forEach(c => {
       const k = key(c);
       const d = dataCache.get(k);
       const clim = d && d.climate;
+      const st = clim && clim.stats;
       const elev = clim && clim.elevation != null ? Math.round(clim.elevation) + ' m' : '—';
-      const warm = clim && clim.stats && clim.stats.warming_per_decade != null
-        ? (clim.stats.warming_per_decade > 0 ? '+' : '') + clim.stats.warming_per_decade + ' ' + tLabelDelta() : '…';
-      const seas = clim && clim.stats && clim.stats.seasonality != null
-        ? clim.stats.seasonality + tLabel() : '…';
-      const low = c.min_temp != null ? Math.round(toUnit(c.min_temp)) : '–';
-      const high = c.max_temp != null ? Math.round(toUnit(c.max_temp)) : '–';
+      const warm = st && st.warming_per_decade != null
+        ? (st.warming_per_decade > 0 ? '+' : '') + st.warming_per_decade + ' ' + tLabelDelta() : '…';
+      const seas = st && st.seasonality != null ? st.seasonality + tLabel() : '…';
+      const cont = st && st.seasonality != null ? continentality(st.seasonality, c.lat) : null;
+      const sun = st && st.sunshine_annual != null ? fmtNum(st.sunshine_annual) + ' h' : '…';
+      const koppen = st && st.koppen
+        ? `<span class="koppen-badge" title="${escapeAttr(st.koppen_name || '')}">${escapeHtml(st.koppen)}</span>` : '…';
       const pop = c.population ? fmtPop(c.population) : '—';
       rows.push(
         `<tr><td><span class="sum-dot" style="background:${c._color}"></span>${escapeHtml(c.name)}` +
         `<span class="sum-country">${escapeHtml(c.country)}</span></td>` +
-        `<td>${fmtLat(c.lat)}</td><td>${elev}</td>` +
-        `<td>${low}/${high}${tLabel()}</td><td>${warm}</td><td>${seas}</td>` +
-        `<td>${longestDay(c.lat).toFixed(1)}h</td><td>${pop}</td></tr>`);
+        `<td>${koppen}</td><td>${fmtLat(c.lat)}</td><td>${elev}</td>` +
+        `<td>${warm}</td><td>${seas}</td><td>${cont != null ? cont : '…'}</td>` +
+        `<td>${sun}</td><td>${longestDay(c.lat).toFixed(1)}h</td><td>${pop}</td></tr>`);
     });
     table.innerHTML = rows.join('');
   }
+  function fmtNum(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function tLabelDelta() { return tempUnit() === 'f' ? '°F/dec' : '°C/dec'; }
 
   async function loadAllData() {
@@ -258,50 +302,61 @@
     } catch (e) { return null; }
   }
 
-  // ---- Build datasets for each chart from cached data ----
-  function datasetsFor(metric) {
+  // ---- Build datasets for a chart definition from cached data ----
+  function datasetsFor(chart) {
     const out = [];
     selected.forEach(c => {
       const d = dataCache.get(key(c));
+      // Daylight is pure geometry — always available from latitude.
+      if (chart.kind === 'daylight') {
+        const pts = [];
+        for (let m = 1; m <= 12; m++) pts.push({ x: m, y: dayLengthMonth(c.lat, m) });
+        out.push({ color: c._color, label: c.name, points: pts });
+        return;
+      }
       if (!d) return;
-      if (metric === 'pop') {
+      if (chart.kind === 'pop') {
         const p = d.population;
-        if (!p || !p.points || p.points.length === 0) return;
-        out.push({ color: c._color, label: c.name,
-          points: p.points.map(pt => ({ x: pt.year, y: pt.value })) });
+        if (!p || !p.points || !p.points.length) return;
+        out.push({ color: c._color, label: c.name, points: p.points.map(pt => ({ x: pt.year, y: pt.value })) });
         return;
       }
       const clim = d.climate;
+      if (chart.kind === 'month') {
+        if (!clim || !clim.monthly || !clim.monthly.length) return;
+        const pts = clim.monthly.map(r => ({
+          x: r.m, y: chart.conv === 'temp' ? toUnit(r[chart.field]) : r[chart.field]
+        })).filter(p => p.y != null);
+        if (pts.length) out.push({ color: c._color, label: c.name, points: pts });
+        return;
+      }
+      // kind === 'year'
       if (!clim || !clim.series || !clim.series.length) return;
-      const pts = clim.series.map(r => {
-        let y;
-        if (metric === 'high') y = toUnit(r.tmax);
-        else if (metric === 'low') y = toUnit(r.tmin);
-        else if (metric === 'mean') y = toUnit(r.tmean);
-        else if (metric === 'precip') y = r.precip;
-        return { x: r.year, y };
-      }).filter(p => p.y != null);
+      const pts = clim.series.map(r => ({
+        x: r.year, y: chart.conv === 'temp' ? toUnit(r[chart.field]) : r[chart.field]
+      })).filter(p => p.y != null);
       if (pts.length) out.push({ color: c._color, label: c.name, points: pts });
     });
     return out;
   }
 
   function redrawCharts() {
-    [['high'], ['low'], ['mean'], ['precip'], ['pop']].forEach(([id]) => {
-      const block = modal.querySelector(`.chart-block[data-chart="${id}"] .chart-area`);
+    const anyData = dataCache.size > 0;
+    CHARTS.forEach(chart => {
+      const block = modal.querySelector(`.chart-block[data-chart="${chart.id}"] .chart-area`);
       if (!block) return;
-      const ds = datasetsFor(id);
-      const anyData = dataCache.size > 0;
+      const ds = datasetsFor(chart);
       if (ds.length === 0) {
-        block.innerHTML = anyData
+        block.innerHTML = (anyData || chart.kind === 'daylight')
           ? '<div class="chart-empty">No data</div>'
           : '<div class="chart-loading">Loading…</div>';
         return;
       }
       block.innerHTML = svgLineChart(ds, {
-        smooth: id === 'pop' ? false : true,
-        markers: id === 'pop',
-        integerY: id === 'pop' || id === 'precip'
+        smooth: chart.smooth,
+        markers: chart.markers,
+        integerY: chart.integerY,
+        xMonths: chart.xMonths
       });
     });
   }
@@ -309,11 +364,13 @@
   // ============================ SVG chart ============================
   function svgLineChart(datasets, opts) {
     opts = opts || {};
+    const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
     const W = 720, H = 200, padL = 44, padR = 12, padT = 12, padB = 22;
     let xs = [], ys = [];
     datasets.forEach(d => d.points.forEach(p => { xs.push(p.x); ys.push(p.y); }));
     let xMin = Math.min(...xs), xMax = Math.max(...xs);
     let yMin = Math.min(...ys), yMax = Math.max(...ys);
+    if (opts.xMonths) { xMin = 1; xMax = 12; }
     if (xMin === xMax) { xMin -= 1; xMax += 1; }
     // Pad y-domain a touch
     const yPad = (yMax - yMin) * 0.08 || 1;
@@ -331,20 +388,26 @@
       grid += `<line class="grid" x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}"/>`;
       grid += `<text class="axis-y" x="${padL - 6}" y="${(yy + 3).toFixed(1)}">${fmtTick(t, opts)}</text>`;
     });
-    // X labels (start, mid, end)
+    // X labels
     let xlab = '';
-    [xMin, Math.round((xMin + xMax) / 2), xMax].forEach(t => {
-      xlab += `<text class="axis-x" x="${px(t).toFixed(1)}" y="${H - 6}">${t}</text>`;
-    });
+    if (opts.xMonths) {
+      for (let m = 1; m <= 12; m++) {
+        xlab += `<text class="axis-x" x="${px(m).toFixed(1)}" y="${H - 6}">${MONTHS[m - 1]}</text>`;
+      }
+    } else {
+      [xMin, Math.round((xMin + xMax) / 2), xMax].forEach(t => {
+        xlab += `<text class="axis-x" x="${px(t).toFixed(1)}" y="${H - 6}">${t}</text>`;
+      });
+    }
 
     const lines = datasets.map(d => {
       const sorted = [...d.points].sort((a, b) => a.x - b.x);
-      const path = sorted.map((p, i) =>
-        (i ? 'L' : 'M') + px(p.x).toFixed(1) + ' ' + py(p.y).toFixed(1)).join(' ');
+      const pts = sorted.map(p => [px(p.x), py(p.y)]);
+      const path = opts.smooth ? smoothPath(pts) : pts.map((p, i) =>
+        (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
       let dots = '';
       if (opts.markers) {
-        dots = sorted.map(p =>
-          `<circle cx="${px(p.x).toFixed(1)}" cy="${py(p.y).toFixed(1)}" r="2.5" fill="${d.color}"/>`).join('');
+        dots = pts.map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="${d.color}"/>`).join('');
       }
       return `<path d="${path}" fill="none" stroke="${d.color}" stroke-width="1.6" ` +
         `stroke-linejoin="round" stroke-linecap="round" opacity="0.92"/>${dots}`;
@@ -352,6 +415,19 @@
 
     return `<svg viewBox="0 0 ${W} ${H}" class="line-chart" preserveAspectRatio="none">` +
       grid + lines + xlab + `</svg>`;
+  }
+
+  // Catmull-Rom -> cubic Bezier smoothing for a series of [x,y] points.
+  function smoothPath(pts) {
+    if (pts.length < 3) return pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += `C${c1x.toFixed(1)} ${c1y.toFixed(1)},${c2x.toFixed(1)} ${c2y.toFixed(1)},${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
   }
 
   function niceTicks(min, max, count) {

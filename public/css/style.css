@@ -1210,3 +1210,67 @@ body {
   .tray-chips { order: 3; width: 100%; }
   .line-chart { height: 160px; }
 }
+
+/* Comparison: sections + Köppen badge */
+.compare-section { margin-top: 26px; }
+.compare-section:first-of-type { margin-top: 6px; }
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.section-head h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+.section-sub {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.koppen-badge {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  cursor: help;
+}
+
+/* Reference-city compare row (panel header) */
+.reference-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.reference-row .reference-city { margin: 0; }
+
+/* Compare toggle inside map dot tooltips */
+.city-tooltip .tip-compare {
+  display: block;
+  margin-top: 6px;
+  width: 100%;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.city-tooltip .tip-compare:hover { border-color: var(--accent); }
+.city-tooltip .tip-compare.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

@@ -432,6 +432,7 @@
     const displayName = city ? city.name : '';
     mobileReferenceCity.textContent = displayName;
     desktopReferenceCity.textContent = displayName;
+    updateReferenceCompareBtn();
 
     // Update north/south labels with new place name
     if (!popNorthBig.classList.contains('hidden')) {
@@ -524,11 +525,7 @@
     cityMarkers.forEach(marker => {
       const city = marker._cityData;
       if (city) {
-        const distStr = formatDistance(city.lat, currentLat);
-        const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
-        marker.setTooltipContent(
-          `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`
-        );
+        marker.setTooltipContent(buildTooltip(city));
       }
     });
   }
@@ -873,7 +870,7 @@
         const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
         const markerColor = getMarkerColor(city.population);
         const markerRadius = getMarkerRadius(city.population);
-        const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`;
+        const tooltipContent = buildTooltip(city);
 
         registerCityMarker(city, {
           radius: markerRadius,
@@ -1202,6 +1199,63 @@
     });
   }
 
+  // Reference-city (currently selected) compare checkbox in the panel header
+  const referenceCompareBtn = document.getElementById('reference-compare');
+  if (referenceCompareBtn) {
+    referenceCompareBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (window.CityCompare && referenceCity) {
+        CityCompare.toggle(referenceCity);
+        updateReferenceCompareBtn();
+      }
+    });
+  }
+  function updateReferenceCompareBtn() {
+    if (!referenceCompareBtn) return;
+    if (referenceCity && window.CityCompare) {
+      referenceCompareBtn.classList.remove('hidden');
+      referenceCompareBtn.classList.toggle('on', CityCompare.has(referenceCity));
+    } else {
+      referenceCompareBtn.classList.add('hidden');
+    }
+  }
+
+  // Build a map-dot tooltip including a compare toggle button
+  function escapeAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+  function buildTooltip(city) {
+    const distStr = formatDistance(city.lat, currentLat);
+    const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
+    const on = window.CityCompare && CityCompare.has(city);
+    const data = `data-name="${escapeAttr(city.name)}" data-country="${escapeAttr(city.country)}" ` +
+      `data-lat="${city.lat}" data-lng="${city.lng}" data-pop="${city.population}" ` +
+      `data-min="${city.min_temp == null ? '' : city.min_temp}" data-max="${city.max_temp == null ? '' : city.max_temp}" ` +
+      `data-avg="${city.avg_temp == null ? '' : city.avg_temp}"`;
+    return `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}` +
+      `<button class="tip-compare${on ? ' on' : ''}" ${data}>${on ? '✓ In compare' : '+ Compare'}</button>`;
+  }
+
+  // Delegated handler for compare buttons inside map tooltips
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest ? e.target.closest('.tip-compare') : null;
+    if (!btn || !window.CityCompare) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const ds = btn.dataset;
+    const city = {
+      name: ds.name, country: ds.country,
+      lat: parseFloat(ds.lat), lng: parseFloat(ds.lng), population: parseInt(ds.pop),
+      min_temp: ds.min === '' ? null : parseFloat(ds.min),
+      max_temp: ds.max === '' ? null : parseFloat(ds.max),
+      avg_temp: ds.avg === '' ? null : parseFloat(ds.avg)
+    };
+    CityCompare.toggle(city);
+    const on = CityCompare.has(city);
+    btn.classList.toggle('on', on);
+    btn.textContent = on ? '✓ In compare' : '+ Compare';
+  });
+
   // Keep compare checkboxes in sync when the list changes externally
   function initCompareSync() {
     if (!window.CityCompare) return;
@@ -1210,6 +1264,7 @@
         updateCitiesList(getVisibleCities());
       }
       if (mobileCities.length) updateMobileCityCard();
+      updateReferenceCompareBtn();
     });
   }
 
@@ -1273,7 +1328,8 @@
     marker.bindTooltip(tooltipContent, {
       permanent: false,
       direction: 'top',
-      className: 'city-tooltip'
+      className: 'city-tooltip',
+      interactive: true
     });
     marker._origColor = options.fillColor;
     marker._cityData = city;
@@ -1362,7 +1418,7 @@
       const markerRadius = getMarkerRadius(city.population);
       const distStr = formatDistance(city.lat, currentLat);
       const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
-      const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`;
+      const tooltipContent = buildTooltip(city);
 
       registerCityMarker(city, {
         radius: markerRadius,
@@ -1383,7 +1439,8 @@
       marker.bindTooltip(tooltipContent, {
         permanent: false,
         direction: 'top',
-        className: 'city-tooltip'
+        className: 'city-tooltip',
+      interactive: true
       });
       marker._origColor = options.fillColor;
       marker._cityData = city;
@@ -1402,7 +1459,7 @@
       const tempRangeStr = formatTempRange(city.min_temp, city.max_temp);
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
-      const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${tempRangeStr}`;
+      const tooltipContent = buildTooltip(city);
 
       registerCityMarker(city, {
         radius: markerRadius,
@@ -1420,8 +1477,7 @@
     clearMapLayers();
     drawLatitudeLine(lat);
 
-    const tempRangeStr = formatTempRange(selectedCity.min_temp, selectedCity.max_temp);
-    const selectedTooltip = `<strong>${selectedCity.name}</strong><br>${formatPopulation(selectedCity.population)} pop<br>${tempRangeStr}`;
+    const selectedTooltip = buildTooltip(selectedCity);
 
     // Create selected marker on all world tiles
     selectedMarkers = createStaticWrappedMarkers(selectedCity, {
@@ -1434,10 +1490,9 @@
 
     matchingCities.forEach(city => {
       const distStr = formatDistance(city.lat, currentLat);
-      const cTempRangeStr = formatTempRange(city.min_temp, city.max_temp);
       const markerColor = getMarkerColor(city.population);
       const markerRadius = getMarkerRadius(city.population);
-      const tooltipContent = `<strong>${city.name}</strong><br>${formatPopulation(city.population)} pop · ${distStr}<br>${cTempRangeStr}`;
+      const tooltipContent = buildTooltip(city);
 
       registerCityMarker(city, {
         radius: markerRadius,

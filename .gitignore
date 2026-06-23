@@ -5,3 +5,5 @@ node_modules/
 data/cache.db
 .playwright-mcp/
 compare-modal-*.png
+compare-*.jpeg
+compare-*.png

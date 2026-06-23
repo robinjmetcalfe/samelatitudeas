@@ -91,7 +91,10 @@
       <!-- Side panel (desktop) -->
       <aside id="cities-panel" class="cities-panel hidden">
         <div class="panel-header">
-          <div class="reference-city" id="reference-city"></div>
+          <div class="reference-row">
+            <button class="compare-check hidden" id="reference-compare" aria-label="Add selected city to comparison" title="Add to comparison"></button>
+            <div class="reference-city" id="reference-city"></div>
+          </div>
           <span class="panel-title">Same Latitude As...</span>
         </div>
         <ul id="cities-list" class="cities-list"></ul>
