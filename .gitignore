@@ -2,3 +2,6 @@
 *.swo
 .DS_Store
 node_modules/
+data/cache.db
+.playwright-mcp/
+compare-modal-*.png

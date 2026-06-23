@@ -924,3 +924,289 @@ body {
     padding: 4px 12px;
   }
 }
+
+/* ============================================================
+   City comparison feature
+   ============================================================ */
+
+/* --- Compare checkbox in the cities list --- */
+.city-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.compare-check {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.compare-check:hover {
+  border-color: var(--accent);
+}
+.compare-check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.compare-check.on::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 10px;
+  border: solid var(--bg-elevated);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.city-item .info { flex: 1 1 auto; min-width: 0; }
+
+/* --- Comparison tray (fixed bottom bar) --- */
+.compare-tray {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(92vw, 880px);
+  padding: 10px 14px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px var(--shadow-color);
+}
+.compare-tray.full-flash { animation: tray-flash 0.4s ease; }
+@keyframes tray-flash {
+  0%, 100% { border-color: var(--border); }
+  50% { border-color: var(--hot); }
+}
+.tray-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.tray-count { color: var(--text); }
+.tray-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 1 1 auto;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+.compare-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 4px 6px 4px 9px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.chip-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.chip-x, .legend-x {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.chip-x:hover, .legend-x:hover { color: var(--text); }
+.tray-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.tray-clear, .tray-go {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tray-clear:hover { background: var(--bg-hover); }
+.tray-go {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+.tray-go:disabled { opacity: 0.4; cursor: not-allowed; }
+[data-theme="light"] .tray-go { color: #fff; }
+
+/* --- Mobile compare button --- */
+.mobile-compare {
+  margin-top: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.mobile-compare.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* --- Comparison modal --- */
+.compare-content {
+  max-width: 820px;
+  width: 94%;
+  max-height: 88vh;
+}
+.compare-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 4px 6px 4px 9px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.legend-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  flex: 0 0 auto;
+}
+.legend-name { display: flex; flex-direction: column; line-height: 1.25; }
+.legend-country, .sum-country {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Summary table */
+.compare-summary-wrap { overflow-x: auto; margin-bottom: 22px; }
+.compare-summary {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.compare-summary th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.compare-summary th:first-child { text-align: left; }
+.compare-summary td {
+  text-align: right;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.compare-summary td:first-child { text-align: left; }
+.compare-summary tr:last-child td { border-bottom: none; }
+.sum-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+}
+.sum-country { margin-left: 6px; }
+
+/* Charts */
+.chart-block { margin-bottom: 20px; }
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.chart-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.chart-unit {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.chart-area {
+  width: 100%;
+  min-height: 60px;
+  background: var(--bg-offscreen);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+}
+.line-chart {
+  width: 100%;
+  height: 200px;
+  display: block;
+}
+.line-chart .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.line-chart .axis-x,
+.line-chart .axis-y {
+  fill: var(--text-muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+}
+.line-chart .axis-y { text-anchor: end; }
+.line-chart .axis-x { text-anchor: middle; }
+.chart-loading, .chart-empty {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 80px 0;
+}
+.compare-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+@media (max-width: 600px) {
+  .compare-tray {
+    left: 8px;
+    right: 8px;
+    transform: none;
+    bottom: 10px;
+    flex-wrap: wrap;
+    max-width: none;
+  }
+  .tray-chips { order: 3; width: 100%; }
+  .line-chart { height: 160px; }
+}

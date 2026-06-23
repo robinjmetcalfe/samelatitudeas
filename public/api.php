@@ -1,8 +1,9 @@
 <?php
 header('Content-Type: application/json');
 
-// Only allow requests from same domain
-$allowedHost = $_SERVER['HTTP_HOST'] ?? '';
+// Only allow requests from same domain (compare host without port, so it
+// works behind any port in local dev as well as on :443 in production)
+$allowedHost = preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? '');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $referer = $_SERVER['HTTP_REFERER'] ?? '';
 

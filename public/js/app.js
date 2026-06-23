@@ -152,6 +152,7 @@
     initModal();
     initIntroModal();
     initMobileNav();
+    initCompareSync();
     fetchPopStats();
   }
 
@@ -379,6 +380,22 @@
 
     mobileCityName.textContent = `${city.name}, ${city.country}`;
     mobileCityMeta.textContent = `${formatPopulation(city.population)} · ${tempRangeStr}`;
+
+    // Compare toggle (created lazily, reused across cards)
+    let cmpBtn = mobileCityCard.querySelector('.mobile-compare');
+    if (!cmpBtn) {
+      cmpBtn = document.createElement('button');
+      cmpBtn.className = 'mobile-compare';
+      cmpBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const c = mobileCities[mobileCityIndex];
+        if (window.CityCompare && c) { CityCompare.toggle(c); updateMobileCityCard(); }
+      });
+      mobileCityCard.appendChild(cmpBtn);
+    }
+    const inCompare = window.CityCompare && CityCompare.has(city);
+    cmpBtn.classList.toggle('on', inCompare);
+    cmpBtn.textContent = inCompare ? '✓ Comparing' : '+ Compare';
 
     // Update button states
     mobilePrevBtn.disabled = mobileCityIndex === 0;
@@ -1130,14 +1147,17 @@
 
   function updateCitiesList(cities) {
     const bounds = map.getBounds();
-    citiesList.innerHTML = cities.slice(0, 100).map(city => {
-      const { name, country, lat, lng, population, avg_temp, min_temp, max_temp } = city;
+    const shown = cities.slice(0, 100);
+    citiesList.innerHTML = shown.map((city, i) => {
+      const { name, country, lat, lng, population, min_temp, max_temp } = city;
       const distStr = formatDistance(lat, currentLat);
       const tempRangeStr = formatTempRange(min_temp, max_temp);
       const inViewport = lng >= bounds.getWest() && lng <= bounds.getEast();
       const offscreenClass = inViewport ? '' : ' offscreen';
+      const inCompare = window.CityCompare && CityCompare.has(city);
       return `
-        <li class="city-item${offscreenClass}" data-lat="${lat}" data-lng="${lng}" data-name="${name}">
+        <li class="city-item${offscreenClass}" data-ci="${i}">
+          <button class="compare-check${inCompare ? ' on' : ''}" data-ci="${i}" aria-label="Add to comparison" title="Add to comparison"></button>
           <div class="info">
             <div class="name">${name}</div>
             <div class="country">${country}</div>
@@ -1151,11 +1171,22 @@
       `;
     }).join('');
 
+    citiesList.querySelectorAll('.compare-check').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const city = shown[parseInt(this.dataset.ci)];
+        if (window.CityCompare && city) {
+          CityCompare.toggle(city);
+          this.classList.toggle('on', CityCompare.has(city));
+        }
+      });
+    });
+
     citiesList.querySelectorAll('.city-item').forEach(item => {
       item.addEventListener('click', function() {
-        const lat = parseFloat(this.dataset.lat);
-        const lng = parseFloat(this.dataset.lng);
-        const name = this.dataset.name;
+        const city = shown[parseInt(this.dataset.ci)];
+        if (!city) return;
+        const { name, lat, lng } = city;
 
         const marker = cityMarkers.find(m => {
           const d = m._cityData;
@@ -1168,6 +1199,17 @@
 
         map.panTo([currentLat, lng], { duration: 0.5 });
       });
+    });
+  }
+
+  // Keep compare checkboxes in sync when the list changes externally
+  function initCompareSync() {
+    if (!window.CityCompare) return;
+    CityCompare.onChange(function() {
+      if (currentLat !== null && currentCities.length) {
+        updateCitiesList(getVisibleCities());
+      }
+      if (mobileCities.length) updateMobileCityCard();
     });
   }
 

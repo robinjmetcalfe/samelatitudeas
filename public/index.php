@@ -140,6 +140,8 @@
           <li><strong>Cities & populations:</strong> GeoNames geographical database</li>
           <li><strong>Temperatures:</strong> WorldClim 2.1 bioclimatic variables (1970-2000 averages)</li>
           <li><strong>Population distribution:</strong> Derived from WorldPop/UN population data</li>
+          <li><strong>Historical climate (comparison):</strong> Open-Meteo ERA5 reanalysis (1940–present)</li>
+          <li><strong>Historical population (comparison):</strong> Wikidata population statements</li>
         </ul>
       </div>
     </div>
@@ -147,6 +149,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="js/population.js?v=<?= filemtime('js/population.js') ?>"></script>
+  <script src="js/compare.js?v=<?= filemtime('js/compare.js') ?>"></script>
   <script src="js/app.js?v=<?= filemtime('js/app.js') ?>"></script>
 
 </body>
