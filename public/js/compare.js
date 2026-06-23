@@ -230,7 +230,7 @@
     html += '<p class="compare-note">Climate: NASA POWER (monthly, 1981–present); Köppen derived from monthly normals. ' +
       'Sunshine: measured from the nearest weather station (Meteostat normals) where one is within 300 km, ' +
       'otherwise estimated from satellite irradiance (marked ~). ' +
-      'Population: Wikidata — recent and sparse for smaller places.</p>';
+      'Population: GHS-UCDB urban-centre estimates (JRC, 1975–2015) where a centre is within 35 km, else Wikidata.</p>';
     body.innerHTML = html;
     renderSummary();
     redrawCharts();

@@ -305,6 +305,32 @@ function measuredSunshine($lat, $lng) {
     return null;
 }
 
+// ---- GHS-UCDB: urban-centre population at 1975/1990/2000/2015 -------------
+function ghsPopDb() {
+    static $db = false;
+    if ($db !== false) return $db;
+    $db = null;
+    foreach (['/var/www/data/ghs-pop.db', __DIR__ . '/../data/ghs-pop.db'] as $c) {
+        if (file_exists($c)) { $db = new SQLite3($c, SQLITE3_OPEN_READONLY); break; }
+    }
+    return $db;
+}
+function nearestGhsCentre($lat, $lng, $maxKm = 35) {
+    $db = ghsPopDb();
+    if (!$db) return null;
+    $dLat = 0.5; $dLng = 0.5 / max(0.2, cos(deg2rad($lat)));
+    $stmt = $db->prepare('SELECT lat,lng,name,country,p75,p90,p00,p15 FROM centres WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?');
+    $stmt->bindValue(1, $lat - $dLat, SQLITE3_FLOAT); $stmt->bindValue(2, $lat + $dLat, SQLITE3_FLOAT);
+    $stmt->bindValue(3, $lng - $dLng, SQLITE3_FLOAT); $stmt->bindValue(4, $lng + $dLng, SQLITE3_FLOAT);
+    $res = $stmt->execute();
+    $best = null; $bestD = $maxKm;
+    while ($r = $res->fetchArray(SQLITE3_ASSOC)) {
+        $d = haversineKm($lat, $lng, $r['lat'], $r['lng']);
+        if ($d <= $bestD) { $bestD = $d; $best = $r; $best['dist'] = $d; }
+    }
+    return $best;
+}
+
 $action = $_GET['action'] ?? '';
 
 if ($action === 'climate') {
@@ -480,11 +506,35 @@ if ($action === 'climate') {
 if ($action === 'population') {
     $lat = round(floatval($_GET['lat'] ?? 0), 2);
     $lng = round(floatval($_GET['lng'] ?? 0), 2);
-    $key = "pop:$lat:$lng";
+    $key = "pop:v2:$lat:$lng";
 
     $cached = cacheGet($key, 60 * 60 * 24 * 30); // 30-day TTL
     if ($cached !== null) { echo $cached; exit; }
 
+    // 1) Prefer GHS-UCDB urban-centre series — consistent 1975/1990/2000/2015,
+    //    global coverage for ~13k cities (far less sparse than Wikidata).
+    $g = nearestGhsCentre($lat, $lng, 35);
+    if ($g) {
+        $points = [];
+        foreach ([1975 => $g['p75'], 1990 => $g['p90'], 2000 => $g['p00'], 2015 => $g['p15']] as $yr => $v) {
+            if ($v) $points[] = ['year' => $yr, 'value' => (int)$v];
+        }
+        if (count($points) >= 2) {
+            $out = [
+                'source' => 'GHS-UCDB urban centre (JRC)',
+                'points' => $points,
+                'centre' => $g['name'],
+                'centre_dist' => round($g['dist']),
+                'note' => null,
+            ];
+            $json = json_encode($out);
+            cacheSet($key, $json);
+            echo $json;
+            exit;
+        }
+    }
+
+    // 2) Fall back to Wikidata dated population statements (sparse, recent).
     // Find nearby settlements with population, plus any dated population statements.
     $sparql = 'SELECT ?city ?curpop ?dist ?pop ?date WHERE {'
         . ' SERVICE wikibase:around { ?city wdt:P625 ?loc.'
